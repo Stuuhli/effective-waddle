@@ -1,0 +1,13 @@
+# Direct production dependencies for rag-platform.
+fastapi
+uvicorn[standard]
+sqlalchemy
+asyncpg
+alembic
+pydantic
+pydantic-settings
+bcrypt
+PyJWT
+graphrag
+jinja2
+python-multipart
