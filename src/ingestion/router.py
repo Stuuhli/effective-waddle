@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from ..auth.dependencies import get_current_user
+from ..infrastructure.database import User
 from .dependencies import get_ingestion_service
 from .schemas import CollectionResponse, IngestionJobCreate, IngestionJobResponse
 from .service import IngestionService
@@ -14,10 +15,10 @@ router = APIRouter()
 @router.post("/jobs", response_model=IngestionJobResponse, status_code=201)
 async def create_job(
     payload: IngestionJobCreate,
-    user_info: tuple[str, list[str]] = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     service: IngestionService = Depends(get_ingestion_service),
 ) -> IngestionJobResponse:
-    job = await service.create_job(user_info[0], payload)
+    job = await service.create_job(user.id, payload)
     return IngestionJobResponse(
         id=job.id,
         status=job.status,
@@ -32,7 +33,7 @@ async def create_job(
 @router.get("/jobs/{job_id}", response_model=IngestionJobResponse)
 async def get_job(
     job_id: str,
-    user_info: tuple[str, list[str]] = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     service: IngestionService = Depends(get_ingestion_service),
 ) -> IngestionJobResponse:
     job = await service.get_job(job_id)
@@ -49,7 +50,7 @@ async def get_job(
 
 @router.get("/collections", response_model=list[CollectionResponse])
 async def list_collections(
-    user_info: tuple[str, list[str]] = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     service: IngestionService = Depends(get_ingestion_service),
 ) -> list[CollectionResponse]:
     collections = await service.list_collections()
