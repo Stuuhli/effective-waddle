@@ -12,15 +12,17 @@ Currently, the development is done in a WSL due to milvus only running on a linu
 ## Prerequisites
 - Python 3.11+
 - PostgreSQL 13+ reachable from the application
-```bash
-sudo apt update
-sudo apt install postgresql postgresql-contrib
-```
 - (Optional) Apptainer/Singularity if you plan to build the runtime container
 - (Optional) Milvus for vector storage
 - (Optional) Ollama or vLLM backend for LLM completions
 - (Optional) GraphRAG workspace on disk if you plan to use the GraphRAG strategy
 - `pip-tools` for deterministic dependency management
+```bash
+sudo apt update
+sudo apt install postgresql postgresql-contrib
+sudo apt install apptainer
+sudo apt install
+```
 
 ## 1. Clone and create a virtual environment
 ```bash
