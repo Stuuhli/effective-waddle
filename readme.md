@@ -12,16 +12,17 @@ Currently, the development is done in a WSL due to milvus only running on a linu
 ## Prerequisites
 - Python 3.11+
 - PostgreSQL 13+ reachable from the application
-- (Optional) Apptainer/Singularity if you plan to build the runtime container
+- Docker for quick local development. Install it on the host system (Windows) and enable Settings → Resources → WSL Integration
+- Apptainer/Singularity if you plan to build the runtime container
 - (Optional) Milvus for vector storage
-- (Optional) Ollama or vLLM backend for LLM completions
-- (Optional) GraphRAG workspace on disk if you plan to use the GraphRAG strategy
+- (Optional) Ollama or vLLM backend for LLM completions (installed to /usr/local)
 - `pip-tools` for deterministic dependency management
 ```bash
 sudo apt update
 sudo apt install postgresql postgresql-contrib
 sudo apt install apptainer
-sudo apt install
+pip install milvus
+curl -fsSL https://ollama.com/install.sh | sh
 ```
 
 ## 1. Clone and create a virtual environment
@@ -63,6 +64,14 @@ cp .env.example .env
 Key settings such as FastAPI secrets, PostgreSQL credentials, Milvus host, and GraphRAG defaults are
 documented in the template.  See [`.env.example`](.env.example) for the authoritative reference.
 
+For generating a FastAPI Key, you can paste the following script into a python terminal
+```bash
+python - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+```
+
 ### PostgreSQL configuration
 On HPC clusters (Slurm + Apptainer) you typically connect to an external PostgreSQL instance
 provisioned by your infrastructure team or a separate VM you control.  The application expects
@@ -81,7 +90,14 @@ docker run \
 ```
 
 Populate the matching values in `.env` (host, port, user, password, database).  The application will
-automatically build the async SQLAlchemy DSN using these fields.
+automatically build the async SQLAlchemy DSN using these fields. <br>
+You can check the state of the container with `docker ps` as well as `docker logs rag-postgres`. <br>Look out for <br>`database system is ready to accept connections`
+
+After the initial container setup, you can simply start and stop it again using 
+```
+docker start rag-postgres
+docker stop rag-postgres
+```
 
 ## 4. Run database migrations
 Apply the latest schema using Alembic:
@@ -112,6 +128,7 @@ python -m src.worker_main
 
 ## 6. Run the test suite
 ```bash
+pip install pytest
 pytest tests -q
 ```
 
