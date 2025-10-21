@@ -66,8 +66,14 @@ def _post_json(url: str, payload: Dict[str, Any], headers: Dict[str, str] | None
 
 
 def _auth_login(email: str, password: str, base_url: str) -> Dict[str, Any]:
-    url = f"{base_url}/auth/login"
-    return _post_json(url, {"email": email, "password": password})
+    url = f"{base_url}/auth/jwt/login"
+    with httpx.Client(timeout=10.0) as client:
+        response = client.post(url, data={"username": email, "password": password})
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("Unexpected response format")
+        return data
 
 
 def _create_ingestion_job(access_token: str, base_url: str, source: str, collection: str) -> Dict[str, Any]:

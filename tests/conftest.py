@@ -21,6 +21,7 @@ from src.config import Settings
 from src.infrastructure.database import Base
 
 import src.auth.dependencies as auth_dependencies
+import src.auth.user_manager as auth_user_manager
 import src.retrieval.dependencies as retrieval_dependencies
 import src.ingestion.dependencies as ingestion_dependencies
 
@@ -116,6 +117,8 @@ def app(monkeypatch: pytest.MonkeyPatch) -> Iterator[FastAPI]:
     monkeypatch.setattr(dependencies, "get_session_factory", _get_session_factory)
     monkeypatch.setattr(dependencies, "get_settings", _get_settings)
     monkeypatch.setattr(auth_dependencies, "get_settings", _get_settings)
+    monkeypatch.setattr(auth_user_manager, "get_db_session", _get_db_session)
+    monkeypatch.setattr(auth_user_manager, "get_settings", _get_settings)
     monkeypatch.setattr(retrieval_dependencies, "get_settings", _get_settings)
     monkeypatch.setattr(ingestion_dependencies, "get_db_session", _get_db_session)
 
