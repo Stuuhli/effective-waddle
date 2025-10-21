@@ -60,9 +60,9 @@ class LLMSettings(BaseModel):
 
     provider: Literal["ollama", "vllm"] = "ollama"
     ollama_host: str = "http://localhost:11434"
-    ollama_model: str = "llama2"
+    ollama_model: str = "qwen3:4b"
     vllm_host: str = "http://localhost:8000"
-    vllm_model: str = "llama2"
+    vllm_model: str = "qwen3:12b"
     request_timeout: int = 60
 
 

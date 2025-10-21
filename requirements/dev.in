@@ -1,5 +1,5 @@
 # Development lock source. Compile with `pip-compile requirements/dev.in`.
--r prod.in
+-r base.in
 httpx
 pip-tools
 pytest

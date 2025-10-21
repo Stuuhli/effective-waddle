@@ -1,5 +1,6 @@
 # Direct production dependencies for rag-platform.
 fastapi
+fastapi-users[sqlalchemy]
 uvicorn[standard]
 sqlalchemy
 asyncpg

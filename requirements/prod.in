@@ -1,2 +1,0 @@
-# Production lock source. Compile with `pip-compile requirements/prod.in`.
--r base.in

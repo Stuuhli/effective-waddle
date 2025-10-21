@@ -34,20 +34,17 @@ pip install pip-tools
 ```
 
 ## 2. Install dependencies via pip-tools
-Dependencies are defined in layered `.in` files and compiled into lockfiles (`requirements/*.txt`).
-Use `pip-sync` to install from the desired lockfile:
+Dependencies are defined in layered `.in` files. Install the package you need.
 
 ```bash
 pip-compile requirements/base.in --verbose
 pip-compile requirements/dev.in --verbose
-pip-compile requirements/prod.in --verbose
 ```
 Is then followed by the lockfile installation
 
 ```bash
 pip-sync requirements/base.txt
 pip-sync requirements/dev.txt
-pip-sync requirements/prod.txt
 ```
 
 If you add new packages, update the relevant `.in` file and regenerate the lockfiles:
@@ -130,7 +127,6 @@ python -m src.worker_main
 
 ## 6. Run the test suite
 ```bash
-pip install pytest
 pytest tests -q
 ```
 
