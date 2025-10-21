@@ -1,7 +1,6 @@
 """Frontend package exports."""
 from __future__ import annotations
 
-from .config import DEFAULT_FRONTEND_CONFIG, FrontendConfig
-from .router import router
+from .gradio_app import create_frontend
 
-__all__ = ["router", "FrontendConfig", "DEFAULT_FRONTEND_CONFIG"]
+__all__ = ["create_frontend"]

@@ -11,3 +11,5 @@ PyJWT
 graphrag
 jinja2
 python-multipart
+httpx
+gradio

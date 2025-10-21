@@ -85,7 +85,7 @@ docker run \
   -e POSTGRES_DB=rag_platform \
   -e POSTGRES_USER=rag_user \
   -e POSTGRES_PASSWORD=rag_password \
-  -p 5432:5432 \
+  -p 5433:5432 \
   -d postgres:15
 ```
 
@@ -115,8 +115,10 @@ in place before running migrations.
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Open <http://localhost:8000/docs> for the interactive OpenAPI explorer.  The frontend router also serves
-a login and dashboard flow at `/frontend`.
+Open <http://localhost:8000/docs> for the interactive OpenAPI explorer. Der Einstiegspunkt (`/`)
+leitet auf die Gradio-Oberfläche unter `/frontend/login` weiter. Dort meldest Du Dich per E-Mail und
+Passwort an; der Login ruft die FastAPI-Auth-Route auf und speichert das JWT im Gradio-State. Erst
+danach werden die Ingestion-Steuerelemente freigeschaltet.
 
 ### Background worker
 The ingestion worker polls the database for new jobs and should be launched alongside the API when you
@@ -165,11 +167,21 @@ production expectations and keeps storage concerns outside of the container runt
 
 ## Project structure
 The FastAPI routers live under `src/`, and supporting infrastructure (database, repositories, vector
-stores, LLM clients) is namespaced under `src/infrastructure`.  Tests are available in `tests/`, while
-`templates/index.html` powers the login + dashboard UI served by the frontend router.
+stores, LLM clients) is namespaced under `src/infrastructure`. Tests sind in `tests/` zu finden. Die
+Gradio-Oberfläche wird in `src/frontend/gradio_app.py` definiert und beim App-Start unter
+`/frontend/login` eingebunden.
 
 ## Troubleshooting
 - Verify the API can reach PostgreSQL using the DSN printed in the startup logs.
 - Ensure Alembic migrations ran successfully before creating users or ingestion jobs.
 - When optional dependencies (Milvus, GraphRAG, Ollama) are unavailable, the code falls back to safe
   placeholders; enable them incrementally and update `.env` accordingly.
+
+
+localhost/docs
+
+{
+  "email": "admin@test.de",
+  "password": "administrator",
+  "full_name": "administrator"
+}
