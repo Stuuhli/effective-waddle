@@ -55,9 +55,9 @@ def _http_error_message(exc: httpx.HTTPError) -> str:
     return str(exc)
 
 
-async def _post_json(url: str, payload: Dict[str, Any], headers: Dict[str, str] | None = None) -> Dict[str, Any]:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.post(url, json=payload, headers=headers)
+def _post_json(url: str, payload: Dict[str, Any], headers: Dict[str, str] | None = None) -> Dict[str, Any]:
+    with httpx.Client(timeout=10.0) as client:
+        response = client.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):  # Defensive, API should return an object
@@ -65,15 +65,15 @@ async def _post_json(url: str, payload: Dict[str, Any], headers: Dict[str, str] 
         return data
 
 
-async def _auth_login(email: str, password: str, base_url: str) -> Dict[str, Any]:
+def _auth_login(email: str, password: str, base_url: str) -> Dict[str, Any]:
     url = f"{base_url}/auth/login"
-    return await _post_json(url, {"email": email, "password": password})
+    return _post_json(url, {"email": email, "password": password})
 
 
-async def _create_ingestion_job(access_token: str, base_url: str, source: str, collection: str) -> Dict[str, Any]:
+def _create_ingestion_job(access_token: str, base_url: str, source: str, collection: str) -> Dict[str, Any]:
     url = f"{base_url}/ingestion/jobs"
     headers = {"Authorization": f"Bearer {access_token}"}
-    return await _post_json(url, {"source": source, "collection_name": collection}, headers=headers)
+    return _post_json(url, {"source": source, "collection_name": collection}, headers=headers)
 
 
 def _status_message(message: str, level: str = "info") -> str:
@@ -95,12 +95,19 @@ def create_frontend(settings: Settings) -> gr.Blocks:
 
     tokens_state: gr.State = gr.State({"access": "", "refresh": "", "base_url": DEFAULT_BASE_URL})
 
-    async def login_action(
+    def login_action(
         email: str,
         password: str,
         base_url: str,
         state: Dict[str, str],
     ) -> tuple[str, Dict[str, str], Any, Any, Any, Any]:
+        """Authenticate the user and persist the resulting tokens in the shared state.
+
+        Gradio passes the current value of :class:`gr.State` as ``state``; the handler
+        returns an updated tuple whose second element becomes the new state.  On
+        success we enable the ingestion controls and show the API response.  On
+        failure the previous state is kept and the form stays disabled.
+        """
         empty_json = gr.update(value="{}", interactive=False)
         if not email or not password:
             return (
@@ -113,7 +120,7 @@ def create_frontend(settings: Settings) -> gr.Blocks:
             )
         base = _normalise_base_url(base_url or state.get("base_url"))
         try:
-            result = await _auth_login(email=email, password=password, base_url=base)
+            result = _auth_login(email=email, password=password, base_url=base)
         except httpx.HTTPError as exc:
             message = _http_error_message(exc)
             return (
@@ -157,6 +164,7 @@ def create_frontend(settings: Settings) -> gr.Blocks:
         )
 
     def logout_action(state: Dict[str, str]) -> tuple[str, Dict[str, str], Any, Any, Any, Any]:
+        """Reset the stored tokens and disable ingestion controls."""
         empty = {"access": "", "refresh": "", "base_url": state.get("base_url", DEFAULT_BASE_URL)}
         return (
             _status_message("ℹ️ Abgemeldet.", "info"),
@@ -167,7 +175,8 @@ def create_frontend(settings: Settings) -> gr.Blocks:
             gr.update(value="{}", interactive=False),
         )
 
-    async def ingestion_action(source: str, collection: str, state: Dict[str, str]) -> tuple[str, str]:
+    def ingestion_action(source: str, collection: str, state: Dict[str, str]) -> tuple[str, str]:
+        """Trigger a new ingestion job for the authenticated user."""
         access = state.get("access")
         base = _normalise_base_url(state.get("base_url"))
         if not access:
@@ -175,7 +184,7 @@ def create_frontend(settings: Settings) -> gr.Blocks:
         if not source or not collection:
             return _status_message("⚠️ Quelle und Collection werden benötigt.", "error"), "{}"
         try:
-            result = await _create_ingestion_job(access, base, source, collection)
+            result = _create_ingestion_job(access, base, source, collection)
         except httpx.HTTPError as exc:
             return _status_message(f"❌ Ingestion fehlgeschlagen: {_http_error_message(exc)}", "error"), "{}"
         except Exception as exc:  # noqa: BLE001
