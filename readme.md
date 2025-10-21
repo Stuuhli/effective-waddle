@@ -6,14 +6,17 @@ an administrative surface into a single FastAPI application.  Async SQLAlchemy m
 vector retrieval can be delegated either to a standard Milvus-powered RAG flow or to the GraphRAG
 adapter that was ported from the legacy project.
 
-## Can I run it now?
-Yes – the current codebase boots end-to-end with PostgreSQL, and optional integrations (Milvus,
-GraphRAG workspace, Ollama/vLLM) can be enabled gradually.  Follow the quick-start steps below to
-launch the API and worker locally.
+## How can it be run?
+Currently, the development is done in a WSL due to milvus only running on a linux system. Within VSCode, open a remote session in WSL Ubuntu, then simply clone the working repo and start working.
 
 ## Prerequisites
 - Python 3.11+
 - PostgreSQL 13+ reachable from the application
+```bash
+sudo apt update
+sudo apt install postgresql postgresql-contrib
+```
+- (Optional) Apptainer/Singularity if you plan to build the runtime container
 - (Optional) Milvus for vector storage
 - (Optional) Ollama or vLLM backend for LLM completions
 - (Optional) GraphRAG workspace on disk if you plan to use the GraphRAG strategy
@@ -21,10 +24,10 @@ launch the API and worker locally.
 
 ## 1. Clone and create a virtual environment
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install pip-tools
+pip install pip-tools
 ```
 
 ## 2. Install dependencies via pip-tools
@@ -32,20 +35,21 @@ Dependencies are defined in layered `.in` files and compiled into lockfiles (`re
 Use `pip-sync` to install from the desired lockfile:
 
 ```bash
-# for local development
-pip-sync requirements/dev.txt
+pip-compile requirements/base.in --verbose
+pip-compile requirements/dev.in --verbose
+pip-compile requirements/prod.in --verbose
+```
+Is then followed by the lockfile installation
 
-# minimal production/runtime footprint
-# pip-sync requirements/prod.txt
+```bash
+pip-sync requirements/base.txt
+pip-sync requirements/dev.txt
+pip-sync requirements/prod.txt
 ```
 
 If you add new packages, update the relevant `.in` file and regenerate the lockfiles:
 
-```bash
-pip-compile requirements/base.in
-pip-compile requirements/prod.in
-pip-compile requirements/dev.in
-```
+
 
 ## 3. Configure environment variables
 Copy the template and adjust credentials as needed:
@@ -57,8 +61,12 @@ cp .env.example .env
 Key settings such as FastAPI secrets, PostgreSQL credentials, Milvus host, and GraphRAG defaults are
 documented in the template.  See [`.env.example`](.env.example) for the authoritative reference.
 
-### PostgreSQL configuration example
-You can spin up a disposable PostgreSQL instance with Docker:
+### PostgreSQL configuration
+On HPC clusters (Slurm + Apptainer) you typically connect to an external PostgreSQL instance
+provisioned by your infrastructure team or a separate VM you control.  The application expects
+network access to that database; no container orchestration is required inside the Apptainer image.
+
+For local development you can still spin up PostgreSQL with Docker if desired:
 
 ```bash
 docker run \
@@ -107,6 +115,26 @@ pytest tests -q
 
 The test harness provisions an async SQLite database in-memory, so PostgreSQL is not required when
 running the automated checks.
+
+## 7. Build & run with Apptainer
+The project is designed to run inside Apptainer containers on Slurm-managed HPC systems. A minimal
+workflow looks like this:
+
+1. Author a definition file (e.g. `rag-platform.def`) that starts from an official Python base image,
+   installs system dependencies (build tools, libpq, etc.), and copies the application with its
+   `requirements/prod.txt`.
+2. From your development machine (or a build node with Apptainer privileges), create the image:
+   ```bash
+   apptainer build rag-platform.sif rag-platform.def
+   ```
+3. Submit a Slurm job that:
+   - Exports environment variables (or binds a secrets file) for PostgreSQL, Milvus, LLM hosts, etc.
+   - Runs `apptainer exec rag-platform.sif uvicorn src.main:app --host 0.0.0.0 --port ${PORT}`.
+   - Optionally launches the ingestion worker in a companion job or step.
+
+The Apptainer image should remain lean: it should not contain a bundled PostgreSQL server. Instead,
+point the application to the managed database instance available in your cluster network. This mirrors
+production expectations and keeps storage concerns outside of the container runtime.
 
 ## Optional services
 - **Milvus**: Update `MILVUS__HOST`, `MILVUS__PORT`, and related settings to point to your vector
