@@ -55,7 +55,8 @@ def test_default_role_uses_rag_strategy(app: FastAPI, session_factory: async_ses
                 register = await client.post("/auth/register", json=payload)
                 assert register.status_code == 201
                 login = await client.post(
-                    "/auth/login", json={"email": payload["email"], "password": payload["password"]}
+                    "/auth/jwt/login",
+                    data={"username": payload["email"], "password": payload["password"]},
                 )
                 assert login.status_code == 200
                 token = login.json()["access_token"]
@@ -100,7 +101,8 @@ def test_graphrag_role_triggers_graphrag_strategy(
                 register = await client.post("/auth/register", json=payload)
                 assert register.status_code == 201
                 login = await client.post(
-                    "/auth/login", json={"email": payload["email"], "password": payload["password"]}
+                    "/auth/jwt/login",
+                    data={"username": payload["email"], "password": payload["password"]},
                 )
                 assert login.status_code == 200
                 token = login.json()["access_token"]

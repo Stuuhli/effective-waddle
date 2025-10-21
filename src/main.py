@@ -8,6 +8,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 
 from . import dependencies
+from .auth.dependencies import configure_auth, get_auth_backend_instance
+from .auth.models import UserCreate, UserRead, UserUpdate
 from .auth.router import router as auth_router
 from .logging import setup_logging
 from .retrieval.router import router as retrieval_router
@@ -40,6 +42,24 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(GZipMiddleware, minimum_size=settings.fastapi.gzip_minimum_size)
 
+    fastapi_users = configure_auth(settings)
+    auth_backend = get_auth_backend_instance()
+
+    app.include_router(
+        fastapi_users.get_auth_router(auth_backend),
+        prefix="/auth/jwt",
+        tags=["auth"],
+    )
+    app.include_router(
+        fastapi_users.get_register_router(UserRead, UserCreate),
+        prefix="/auth",
+        tags=["auth"],
+    )
+    app.include_router(
+        fastapi_users.get_users_router(UserRead, UserUpdate),
+        prefix="/users",
+        tags=["users"],
+    )
     app.include_router(auth_router, prefix="/auth", tags=["auth"])
     app.include_router(retrieval_router, prefix="/chat", tags=["retrieval"])
     app.include_router(ingestion_router, prefix="/ingestion", tags=["ingestion"])

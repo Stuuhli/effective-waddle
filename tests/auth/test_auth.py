@@ -21,12 +21,13 @@ def test_register_login_and_me_flow(app: FastAPI) -> None:
                 assert "user" in registered["roles"]
 
                 login_response = await client.post(
-                    "/auth/login", json={"email": payload["email"], "password": payload["password"]}
+                    "/auth/jwt/login",
+                    data={"username": payload["email"], "password": payload["password"]},
                 )
                 assert login_response.status_code == 200
                 tokens = login_response.json()
+                assert tokens.get("token_type") == "bearer"
                 assert "access_token" in tokens and tokens["access_token"]
-                assert "refresh_token" in tokens and tokens["refresh_token"]
 
                 headers = {"Authorization": f"Bearer {tokens['access_token']}"}
                 me_response = await client.get("/auth/me", headers=headers)

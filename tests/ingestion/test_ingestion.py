@@ -20,7 +20,8 @@ def test_ingestion_job_lifecycle(app: FastAPI, session_factory: async_sessionmak
                 register = await client.post("/auth/register", json=user_payload)
                 assert register.status_code == 201
                 login = await client.post(
-                    "/auth/login", json={"email": user_payload["email"], "password": user_payload["password"]}
+                    "/auth/jwt/login",
+                    data={"username": user_payload["email"], "password": user_payload["password"]},
                 )
                 assert login.status_code == 200
                 token = login.json()["access_token"]

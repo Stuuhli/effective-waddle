@@ -18,7 +18,8 @@ def test_non_admin_cannot_access_admin_routes(app: FastAPI) -> None:
                 assert register_response.status_code == 201
 
                 login_response = await client.post(
-                    "/auth/login", json={"email": payload["email"], "password": payload["password"]}
+                    "/auth/jwt/login",
+                    data={"username": payload["email"], "password": payload["password"]},
                 )
                 assert login_response.status_code == 200
                 token = login_response.json()["access_token"]
