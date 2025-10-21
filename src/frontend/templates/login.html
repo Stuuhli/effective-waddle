@@ -173,8 +173,41 @@
           if (responseBody) {
             responseBody.textContent = formatResponse(data);
           }
+
+          const accessToken = data?.access_token || '';
+          const refreshToken = data?.refresh_token || '';
+          if (accessToken) {
+            document.cookie = 'rag_token=; Max-Age=0; Path=/; SameSite=Lax;';
+            document.cookie = `rag_token=${accessToken}; Path=/; SameSite=Lax; Max-Age=1800;`;
+          }
+          if (refreshToken) {
+            document.cookie = 'rag_refresh=; Max-Age=0; Path=/; SameSite=Lax;';
+            document.cookie = `rag_refresh=${refreshToken}; Path=/; SameSite=Lax;`;
+          }
+
+          let adminFlag = false;
+          if (accessToken) {
+            try {
+              const profileResponse = await fetch('/auth/me', {
+                headers: {
+                  Accept: 'application/json',
+                  Authorization: `Bearer ${accessToken}`,
+                },
+              });
+              if (profileResponse.ok) {
+                const profile = await profileResponse.json();
+                adminFlag = Array.isArray(profile?.roles) && profile.roles.includes('admin');
+              }
+            } catch (profileError) {
+              console.error('Failed to load profile after login', profileError);
+            }
+          }
+
+          document.cookie = 'rag_admin=; Max-Age=0; Path=/; SameSite=Lax;';
+          document.cookie = `rag_admin=${adminFlag ? '1' : '0'}; Path=/; SameSite=Lax; Max-Age=1800;`;
+
           setTimeout(() => {
-            window.location.assign('/chat');
+            window.location.assign('/frontend/chat');
           }, 600);
         } catch (error) {
           setStatus(`Unexpected error: ${error}`, 'error');

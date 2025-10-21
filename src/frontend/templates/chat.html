@@ -1,31 +1,241 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RAG Platform – Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link
       rel="stylesheet"
-      href="{{ url_for('frontend_static', path='login.css') }}"
+      href="{{ url_for('frontend_static', path='chat.css') }}"
     />
   </head>
-  <body>
-    <div class="grain-overlay" aria-hidden="true"></div>
-    <main class="page">
-      <section class="card">
-        <header class="card__header">
-          <div class="card__badge">KiRa - KISTERS RAG PLATFORM</div>
-          <h1 class="card__title">Interactive Chat</h1>
-          <p class="card__subtitle">
-            Here you will find the chat interface. Meanwhile, you can continue to use the API routes.
-          </p>
-        </header>
-        <div class="status" data-state="info">
-          <p class="status__message">
-            Placeholder-View – the full chat UI is coming soon.
-          </p>
+  <body data-admin="{{ 'true' if is_admin else 'false' }}">
+    <div class="chat-layout chat-layout--sidebar-open" id="chat-layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar__header">
+          <h2>Conversations</h2>
+          <button class="sidebar__icon-button" id="sidebar-close" type="button" aria-label="Close sidebar">
+            <span class="icon icon--close"></span>
+          </button>
         </div>
-      </section>
-    </main>
+        <nav class="sidebar__section">
+          <div class="sidebar__section-header">
+            <h3>Recent</h3>
+            <button class="sidebar__link sidebar__link--ghost" id="new-conversation" type="button">
+              <span class="icon icon--plus"></span>
+              New conversation
+            </button>
+          </div>
+          <ul class="conversation-list" id="conversation-list">
+            {% if conversations %}
+              {% for convo in conversations %}
+                <li class="conversation-list__item">
+                  <button class="conversation-list__button" type="button" data-id="{{ convo.id }}">
+                    <span class="conversation-list__title">{{ convo.title }}</span>
+                    <span class="conversation-list__meta">{{ convo.updated_at }}</span>
+                  </button>
+                </li>
+              {% endfor %}
+            {% else %}
+              <li class="conversation-list__empty">No conversations yet. Create your first one to begin.</li>
+            {% endif %}
+          </ul>
+        </nav>
+        <nav class="sidebar__section sidebar__section--admin" id="admin-links" aria-label="Admin tools">
+          <h3>Admin tools</h3>
+          <a class="sidebar__link" href="/frontend/ingestion">Ingestion Console</a>
+          <a class="sidebar__link" href="/frontend/admin">User Management</a>
+        </nav>
+      </aside>
+
+      <div class="main">
+        <header class="main__header">
+          <button class="sidebar-toggle" id="sidebar-open" type="button" aria-label="Toggle sidebar">
+            <span class="icon icon--menu"><span class="icon__line"></span></span>
+          </button>
+          <div class="main__title">
+            <h1>Chat Console</h1>
+            <p>Stream responses from your LLM, manage conversations, and jump into admin tools.</p>
+          </div>
+          <div class="status-pill status-pill--idle" id="stream-status" role="status" aria-live="polite">
+            Idle
+          </div>
+        </header>
+
+        <section class="chat-window" id="chat-window" aria-live="polite">
+          <div class="message message--system">
+            <span class="message__author">System</span>
+            <p class="message__content">
+              Select an existing conversation or start a new one to begin streaming responses. Messages will appear here.
+            </p>
+          </div>
+        </section>
+
+        <form class="composer" id="chat-form" autocomplete="off">
+          <label class="composer__label" for="chat-input">Ask the model</label>
+          <textarea
+            class="composer__input"
+            id="chat-input"
+            name="message"
+            rows="3"
+            placeholder="Compose your question or instruction..."
+            required
+          ></textarea>
+          <div class="composer__actions">
+            <button class="button button--primary" type="submit" id="send-button">
+              <span class="icon icon--send"></span>
+              Send & Stream
+            </button>
+            <button class="button button--ghost" type="button" id="stop-stream" disabled>
+              <span class="icon icon--stop"></span>
+              Stop streaming
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      const layout = document.getElementById('chat-layout');
+      const sidebar = document.getElementById('sidebar');
+      const sidebarOpen = document.getElementById('sidebar-open');
+      const sidebarClose = document.getElementById('sidebar-close');
+      const adminLinks = document.getElementById('admin-links');
+      const chatWindow = document.getElementById('chat-window');
+      const chatForm = document.getElementById('chat-form');
+      const chatInput = document.getElementById('chat-input');
+      const streamStatus = document.getElementById('stream-status');
+      const stopStreamButton = document.getElementById('stop-stream');
+      const sendButton = document.getElementById('send-button');
+      const conversationList = document.getElementById('conversation-list');
+
+      const cookieValue = document.cookie.split('; ').find((row) => row.startsWith('rag_admin='));
+      const adminFlag = cookieValue ? cookieValue.split('=')[1] === '1' : document.body.dataset.admin === 'true';
+      if (!adminFlag && adminLinks) {
+        adminLinks.hidden = true;
+      }
+
+      function openSidebar() {
+        layout.classList.add('chat-layout--sidebar-open');
+        layout.classList.remove('chat-layout--sidebar-hidden');
+      }
+
+      function closeSidebar() {
+        layout.classList.add('chat-layout--sidebar-hidden');
+        layout.classList.remove('chat-layout--sidebar-open');
+      }
+
+      sidebarOpen?.addEventListener('click', () => {
+        const isHidden = layout.classList.contains('chat-layout--sidebar-hidden');
+        if (isHidden) {
+          openSidebar();
+        } else {
+          closeSidebar();
+        }
+      });
+
+      sidebarClose?.addEventListener('click', closeSidebar);
+
+      let streamingInterval = null;
+      let streamBuffer = [];
+
+      function setStreamingState(state) {
+        streamStatus.textContent = state === 'streaming' ? 'Streaming…' : state === 'stopped' ? 'Stopped' : 'Idle';
+        streamStatus.classList.toggle('status-pill--streaming', state === 'streaming');
+        streamStatus.classList.toggle('status-pill--idle', state !== 'streaming');
+        stopStreamButton.disabled = state !== 'streaming';
+        sendButton.disabled = state === 'streaming';
+      }
+
+      function appendMessage(type, text) {
+        const message = document.createElement('div');
+        message.className = `message message--${type}`;
+        const author = document.createElement('span');
+        author.className = 'message__author';
+        author.textContent = type === 'user' ? 'You' : type === 'assistant' ? 'Assistant' : 'System';
+        const body = document.createElement('p');
+        body.className = 'message__content';
+        body.textContent = text;
+        message.append(author, body);
+        chatWindow.appendChild(message);
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+        return message;
+      }
+
+      function startMockStreaming(container) {
+        const placeholderTokens = [
+          'Generating response',
+          'Streaming chunk 1',
+          'Streaming chunk 2',
+          'Finalizing output',
+        ];
+        streamBuffer = [...placeholderTokens];
+        setStreamingState('streaming');
+
+        streamingInterval = window.setInterval(() => {
+          const token = streamBuffer.shift();
+          if (!token) {
+            stopStreaming('idle');
+            container.querySelector('.message__content').textContent = 'Streaming skeleton complete. Integrate LLM output here.';
+            return;
+          }
+          container.querySelector('.message__content').textContent = token;
+        }, 1200);
+      }
+
+      function stopStreaming(nextState = 'stopped') {
+        if (streamingInterval) {
+          window.clearInterval(streamingInterval);
+          streamingInterval = null;
+        }
+        setStreamingState(nextState);
+      }
+
+      chatForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const value = chatInput.value.trim();
+        if (!value) {
+          return;
+        }
+        appendMessage('user', value);
+        chatInput.value = '';
+        const assistant = appendMessage('assistant', 'Preparing to stream…');
+        startMockStreaming(assistant);
+      });
+
+      stopStreamButton.addEventListener('click', () => {
+        stopStreaming();
+        const lastAssistant = [...chatWindow.querySelectorAll('.message--assistant')].pop();
+        if (lastAssistant) {
+          lastAssistant.querySelector('.message__content').textContent += ' (stream stopped)';
+        }
+      });
+
+      conversationList?.addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-id]');
+        if (!button) {
+          return;
+        }
+        Array.from(conversationList.querySelectorAll('.conversation-list__button--active')).forEach((active) =>
+          active.classList.remove('conversation-list__button--active'),
+        );
+        button.classList.add('conversation-list__button--active');
+        appendMessage('system', `Loaded conversation "${button.querySelector('.conversation-list__title').textContent}".`);
+
+        closeSidebar();
+      });
+
+      document.getElementById('new-conversation')?.addEventListener('click', () => {
+        appendMessage('system', 'New conversation started. Streaming responses will appear here.');
+      });
+
+      setStreamingState('idle');
+    </script>
   </body>
 </html>

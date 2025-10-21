@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAG Platform – Ingestion</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('frontend_static', path='ingestion.css') }}"
+    />
+  </head>
+  <body data-admin="{{ 'true' if is_admin else 'false' }}">
+    <header class="workspace-header" id="ingestion-header">
+      <div class="workspace-header__lead">
+        <h1>Ingestion Workflow</h1>
+        <p>Scan PDFs with Docling, chunk intelligently, and feed collections ready for retrieval.</p>
+      </div>
+      <div class="workspace-header__meta">
+        <span class="workspace-pill">Docling pipeline</span>
+        <span class="workspace-pill">Chunking with citations</span>
+      </div>
+    </header>
+
+    <div class="ingestion-layout" id="ingestion-layout">
+      <section class="ingestion-panel ingestion-panel--input">
+        <header class="panel-heading">
+          <div>
+            <h2>Document Intake</h2>
+            <p>Drop PDFs or browse files. Each document will be parsed by Docling prior to chunking.</p>
+          </div>
+          <div class="panel-heading__actions">
+            <input class="visually-hidden" id="file-input" type="file" accept="application/pdf" multiple />
+            <button class="button button--ghost" id="file-browse" type="button">Browse files</button>
+            <button class="button button--ghost" id="file-clear" type="button" disabled>Clear</button>
+          </div>
+        </header>
+
+        <div class="dropzone" id="dropzone" role="button" tabindex="0">
+          <span class="dropzone__icon"></span>
+          <p class="dropzone__text">
+            Drag & drop PDF documents here <br />or click to add them to the queue.
+          </p>
+          <p class="dropzone__hint">Docling will classify layout, extract text, tables, and figures.</p>
+        </div>
+
+        <ul class="file-list" id="file-list" aria-live="polite"></ul>
+
+        <form class="config" id="ingestion-config">
+          <h3>Chunking strategy</h3>
+          <div class="config__grid">
+            <label class="config__field">
+              <span>Chunk size (tokens)</span>
+              <input type="number" name="chunk_size" value="750" min="100" max="2000" step="50" required />
+            </label>
+            <label class="config__field">
+              <span>Chunk overlap (tokens)</span>
+              <input type="number" name="chunk_overlap" value="150" min="0" max="500" step="10" required />
+            </label>
+            <label class="config__field">
+              <span>Collection</span>
+              <select name="collection" id="collection-select" required>
+                {% for collection in collections %}
+                  <option value="{{ collection.name }}">{{ collection.name }} • {{ collection.document_count }} docs</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="config__toggle">
+              <input type="checkbox" name="include_tables" checked />
+              <span>Preserve tables & figures (Docling structured output)</span>
+            </label>
+            <label class="config__toggle">
+              <input type="checkbox" name="generate_citations" checked />
+              <span>Generate citation metadata for each chunk</span>
+            </label>
+          </div>
+        </form>
+      </section>
+
+      <section class="ingestion-panel ingestion-panel--workflow" id="workflow-panel">
+        <header class="panel-heading">
+          <div>
+            <h2>Pipeline Orchestration</h2>
+            <p>Kick off the ingestion workflow, monitor Docling parsing, chunking and citation extraction.</p>
+          </div>
+          <div class="panel-heading__actions">
+            <button class="button button--ghost" id="reset-workflow" type="button">Reset</button>
+            <button class="button button--primary" id="run-workflow" type="button" disabled>
+              <span class="icon icon--spark"></span>
+              Run ingestion
+            </button>
+          </div>
+        </header>
+
+        <ol class="pipeline" id="pipeline">
+          <li class="pipeline__step" data-step="docling">
+            <div class="pipeline__status">Pending</div>
+            <div class="pipeline__content">
+              <h3>Docling parse</h3>
+              <p>Convert PDFs to Docling JSON, classify layout blocks, detect tables, assign reading order.</p>
+              <pre class="pipeline__code" aria-hidden="true">docling.parse(document)</pre>
+            </div>
+          </li>
+          <li class="pipeline__step" data-step="chunking">
+            <div class="pipeline__status">Pending</div>
+            <div class="pipeline__content">
+              <h3>Chunk assembly</h3>
+              <p>Segment semantic chunks with sliding windows using configured size & overlap.</p>
+              <pre class="pipeline__code">docling.make_chunks(size, overlap)</pre>
+            </div>
+          </li>
+          <li class="pipeline__step" data-step="embeddings">
+            <div class="pipeline__status">Pending</div>
+            <div class="pipeline__content">
+              <h3>Embedding & indexing</h3>
+              <p>Embed each chunk with the active model, stage payloads, upsert into vector store collection.</p>
+              <pre class="pipeline__code">vector_index.upsert(chunks)</pre>
+            </div>
+          </li>
+          <li class="pipeline__step" data-step="citations">
+            <div class="pipeline__status">Pending</div>
+            <div class="pipeline__content">
+              <h3>Citation enrichment</h3>
+              <p>Link chunk spans back to document coordinates and build citation graph for downstream usage.</p>
+              <pre class="pipeline__code">citation_engine.create_links(chunks)</pre>
+            </div>
+          </li>
+        </ol>
+
+        <section class="workflow-preview" id="workflow-preview">
+          <header>
+            <h3>Preview</h3>
+            <p>Docling artefacts, chunk statistics and citation stubs appear here once the workflow runs.</p>
+          </header>
+          <div class="preview-grid">
+            <article class="preview-card" id="preview-docling">
+              <h4>Docling extract</h4>
+              <pre>{"status": "waiting for run"}</pre>
+            </article>
+            <article class="preview-card" id="preview-chunks">
+              <h4>Chunk summary</h4>
+              <pre>{"status": "waiting for run"}</pre>
+            </article>
+            <article class="preview-card" id="preview-citations">
+              <h4>Citations</h4>
+              <pre>{"status": "waiting for run"}</pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="job-history">
+          <header>
+            <h3>Recent jobs</h3>
+            <button class="link-button" id="refresh-jobs" type="button">Refresh</button>
+          </header>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Job ID</th>
+                <th scope="col">Source</th>
+                <th scope="col">Collection</th>
+                <th scope="col">Status</th>
+                <th scope="col">Updated</th>
+              </tr>
+            </thead>
+            <tbody id="job-table-body">
+              {% for job in recent_jobs %}
+                <tr>
+                  <td>{{ job.id }}</td>
+                  <td>{{ job.source }}</td>
+                  <td>{{ job.collection }}</td>
+                  <td><span class="status-pill status-pill--{{ job.status }}">{{ job.status }}</span></td>
+                  <td>{{ job.updated_at }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+      </section>
+    </div>
+
+    <script>
+      const fileInput = document.getElementById('file-input');
+      const fileBrowse = document.getElementById('file-browse');
+      const fileClear = document.getElementById('file-clear');
+      const dropzone = document.getElementById('dropzone');
+      const fileList = document.getElementById('file-list');
+      const runWorkflow = document.getElementById('run-workflow');
+      const resetWorkflow = document.getElementById('reset-workflow');
+      const configForm = document.getElementById('ingestion-config');
+      const pipelineElement = document.getElementById('pipeline');
+      const previewDocling = document.getElementById('preview-docling').querySelector('pre');
+      const previewChunks = document.getElementById('preview-chunks').querySelector('pre');
+      const previewCitations = document.getElementById('preview-citations').querySelector('pre');
+      const jobTableBody = document.getElementById('job-table-body');
+      const ingestionHeader = document.getElementById('ingestion-header');
+      const workflowPanel = document.getElementById('workflow-panel');
+
+      let queue = [];
+      const cookieValue = document.cookie.split('; ').find((row) => row.startsWith('rag_admin='));
+      const adminFlag = cookieValue ? cookieValue.split('=')[1] === '1' : document.body.dataset.admin === 'true';
+
+      if (!adminFlag) {
+        workflowPanel.hidden = true;
+        ingestionHeader.querySelector('.workspace-header__lead p').textContent =
+          'Upload PDFs to request ingestion. Administrators can run Docling workflows or review jobs in the console.';
+      }
+      let pipelineTimer = null;
+
+      function updateQueueView() {
+        fileList.innerHTML = '';
+        if (!queue.length) {
+          fileList.innerHTML = '<li class="file-list__empty">No documents queued yet.</li>';
+          runWorkflow.disabled = true;
+          fileClear.disabled = true;
+          return;
+        }
+        queue.forEach((file, index) => {
+          const item = document.createElement('li');
+          item.className = 'file-list__item';
+          item.innerHTML = `
+            <span>
+              <strong>${file.name}</strong>
+              <small>${(file.size / 1024 / 1024).toFixed(2)} MB</small>
+            </span>
+            <button class="chip" data-index="${index}" type="button">Remove</button>
+          `;
+          fileList.appendChild(item);
+        });
+        runWorkflow.disabled = false;
+        fileClear.disabled = false;
+      }
+
+      function addFiles(files) {
+        const pdfs = Array.from(files).filter((file) => file.type === 'application/pdf');
+        queue = queue.concat(pdfs);
+        updateQueueView();
+      }
+
+      fileBrowse.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', (event) => addFiles(event.target.files));
+
+      fileClear.addEventListener('click', () => {
+        queue = [];
+        updateQueueView();
+      });
+
+      fileList.addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-index]');
+        if (!button) {
+          return;
+        }
+        const index = Number(button.dataset.index);
+        queue.splice(index, 1);
+        updateQueueView();
+      });
+
+      function highlightDropzone(active) {
+        dropzone.classList.toggle('dropzone--active', active);
+      }
+
+      dropzone.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        highlightDropzone(true);
+      });
+
+      dropzone.addEventListener('dragleave', () => highlightDropzone(false));
+
+      dropzone.addEventListener('drop', (event) => {
+        event.preventDefault();
+        highlightDropzone(false);
+        addFiles(event.dataTransfer.files);
+      });
+
+      dropzone.addEventListener('click', () => fileInput.click());
+      dropzone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          fileInput.click();
+        }
+      });
+
+      function setStepStatus(step, status, detail) {
+        const element = pipelineElement.querySelector(`[data-step="${step}"]`);
+        if (!element) return;
+        element.classList.remove('pipeline__step--pending', 'pipeline__step--running', 'pipeline__step--done', 'pipeline__step--error');
+        element.classList.add(`pipeline__step--${status}`);
+        element.querySelector('.pipeline__status').textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        if (detail) {
+          element.querySelector('.pipeline__content p').textContent = detail;
+        }
+      }
+
+      function resetPipeline() {
+        ['docling', 'chunking', 'embeddings', 'citations'].forEach((step) => setStepStatus(step, 'pending'));
+        previewDocling.textContent = '{"status": "waiting for run"}';
+        previewChunks.textContent = '{"status": "waiting for run"}';
+        previewCitations.textContent = '{"status": "waiting for run"}';
+        if (pipelineTimer) {
+          window.clearTimeout(pipelineTimer);
+          pipelineTimer = null;
+        }
+      }
+
+      resetWorkflow.addEventListener('click', () => {
+        queue = [];
+        updateQueueView();
+        resetPipeline();
+      });
+
+      function simulateWorkflow(config) {
+        const steps = [
+          {
+            id: 'docling',
+            duration: 1500,
+            onComplete: () => {
+              previewDocling.textContent = JSON.stringify({
+                parser: 'docling',
+                blocks: 342,
+                tables: config.include_tables ? 12 : 0,
+                duration_ms: 1340,
+              }, null, 2);
+            },
+          },
+          {
+            id: 'chunking',
+            duration: 1300,
+            onComplete: () => {
+              previewChunks.textContent = JSON.stringify({
+                chunk_size: config.chunk_size,
+                chunk_overlap: config.chunk_overlap,
+                total_chunks: Math.max(12, Math.floor(Math.random() * 21) + 8),
+              }, null, 2);
+            },
+          },
+          {
+            id: 'embeddings',
+            duration: 1800,
+            onComplete: () => {
+              previewChunks.textContent = JSON.stringify({
+                ...JSON.parse(previewChunks.textContent || '{}'),
+                embeddings_model: 'text-embedding-3-large',
+                vector_store: config.collection,
+              }, null, 2);
+            },
+          },
+          {
+            id: 'citations',
+            duration: 1200,
+            onComplete: () => {
+              if (!config.generate_citations) {
+                previewCitations.textContent = JSON.stringify({ disabled: true }, null, 2);
+                return;
+              }
+              previewCitations.textContent = JSON.stringify({
+                total_citations: Math.floor(Math.random() * 15) + 3,
+                examples: [
+                  {
+                    chunk_id: 'chunk-12',
+                    span: 'p.3 paragraph 2',
+                    reference: 'Docling#table-5',
+                  },
+                ],
+              }, null, 2);
+            },
+          },
+        ];
+
+        let delay = 0;
+        steps.forEach((step, index) => {
+          setStepStatus(step.id, 'running');
+          delay += step.duration;
+          pipelineTimer = window.setTimeout(() => {
+            setStepStatus(step.id, 'done');
+            step.onComplete?.();
+            if (index === steps.length - 1) {
+              appendJobRow({
+                id: `job-${Date.now()}`,
+                source: queue.map((file) => file.name).join(', '),
+                collection: config.collection,
+                status: 'completed',
+                updated_at: 'just now',
+              });
+            }
+          }, delay);
+        });
+      }
+
+      function appendJobRow(job) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${job.id}</td>
+          <td>${job.source}</td>
+          <td>${job.collection}</td>
+          <td><span class="status-pill status-pill--${job.status}">${job.status}</span></td>
+          <td>${job.updated_at}</td>
+        `;
+        jobTableBody.prepend(row);
+      }
+
+      runWorkflow.addEventListener('click', async () => {
+        const formData = new FormData(configForm);
+        const config = {
+          chunk_size: Number(formData.get('chunk_size')),
+          chunk_overlap: Number(formData.get('chunk_overlap')),
+          collection: String(formData.get('collection')),
+          include_tables: formData.get('include_tables') === 'on',
+          generate_citations: formData.get('generate_citations') === 'on',
+        };
+
+        resetPipeline();
+        simulateWorkflow(config);
+
+        /*
+        // TODO: integrate with backend ingestion endpoints
+        const payload = {
+          source: uploadedLocation,
+          collection_name: config.collection,
+        };
+        const response = await fetch('/ingestion/jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        */
+      });
+
+      document.getElementById('refresh-jobs')?.addEventListener('click', async () => {
+        try {
+          const response = await fetch('/ingestion/collections', { headers: { Accept: 'application/json' } });
+          if (!response.ok) {
+            throw new Error('Failed to refresh collections');
+          }
+          const collections = await response.json();
+          const select = document.getElementById('collection-select');
+          select.innerHTML = '';
+          collections.forEach((item) => {
+            const option = document.createElement('option');
+            option.value = item.name;
+            option.textContent = `${item.name} • ${item.document_count} docs`;
+            select.appendChild(option);
+          });
+        } catch (error) {
+          console.error(error);
+        }
+      });
+
+      updateQueueView();
+    </script>
+  </body>
+</html>

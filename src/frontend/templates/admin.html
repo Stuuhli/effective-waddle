@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAG Platform – Admin Overview</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('frontend_static', path='ingestion.css') }}"
+    />
+  </head>
+  <body>
+    <header class="workspace-header">
+      <div class="workspace-header__lead">
+        <h1>Admin Console (Coming Soon)</h1>
+        <p>Manage users, roles, and system feature flags. The interactive console will live here shortly.</p>
+      </div>
+      <div class="workspace-header__meta">
+        <span class="workspace-pill">Roles</span>
+        <span class="workspace-pill">Feature flags</span>
+      </div>
+    </header>
+
+    <div class="ingestion-layout">
+      <section class="ingestion-panel">
+        <header class="panel-heading">
+          <div>
+            <h2>User management</h2>
+            <p>Provision and edit user accounts. The final UI will surface search, role assignment, and status toggles.</p>
+          </div>
+        </header>
+        <div class="dropzone">
+          <p class="dropzone__text">Placeholder content</p>
+          <p class="dropzone__hint">This space will soon host tables, filters and actions for administrators.</p>
+        </div>
+      </section>
+
+      <section class="ingestion-panel">
+        <header class="panel-heading">
+          <div>
+            <h2>Feature controls</h2>
+            <p>Toggle GraphRAG, ingestion, and platform features once the configuration endpoint is available.</p>
+          </div>
+        </header>
+        <div class="dropzone">
+          <p class="dropzone__text">Stay tuned</p>
+          <p class="dropzone__hint">Hook this view into your admin APIs to unlock advanced management workflows.</p>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

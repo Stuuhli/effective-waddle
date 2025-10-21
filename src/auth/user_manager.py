@@ -25,6 +25,9 @@ class UserManager(BaseUserManager[User, str]):
 
     user_db_model = User
 
+    def parse_id(self, user_id: str) -> str:  # type: ignore[override]
+        return user_id
+
     def __init__(self, user_db: SQLAlchemyUserDatabase[User, str], settings: Settings) -> None:
         super().__init__(user_db)
         self._settings = settings
