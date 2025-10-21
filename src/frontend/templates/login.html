@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAG Platform – Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('frontend_static', path='login.css') }}"
+    />
+  </head>
+  <body>
+    <div class="grain-overlay" aria-hidden="true"></div>
+    <div class="background-orb orb-left" aria-hidden="true"></div>
+    <div class="background-orb orb-right" aria-hidden="true"></div>
+    <main class="page">
+      <section class="card">
+        <header class="card__header">
+          <div class="card__badge">RAG Platform</div>
+          <h1 class="card__title">Willkommen zurück</h1>
+          <p class="card__subtitle">
+            Melde dich an, um Zugriff auf Admin-, Retrieval- und Ingestion-Funktionen zu erhalten.
+          </p>
+        </header>
+        <form id="login-form" class="form" action="/auth/jwt/login" method="post">
+          <div class="form__field">
+            <label class="form__label" for="email">E-Mail</label>
+            <div class="input-wrapper">
+              <input
+                id="email"
+                type="email"
+                name="username"
+                placeholder="du@example.com"
+                autocomplete="email"
+                required
+              />
+            </div>
+          </div>
+          <div class="form__field">
+            <label class="form__label" for="password">Passwort</label>
+            <div class="input-wrapper input-wrapper--password">
+              <input
+                id="password"
+                type="password"
+                name="password"
+                placeholder="••••••••"
+                autocomplete="current-password"
+                required
+              />
+              <button class="toggle-password" type="button" aria-label="Passwort anzeigen">
+                <span class="toggle-password__icon" aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
+          <button class="button" type="submit">Anmelden</button>
+        </form>
+        <section class="status" id="status" role="status" aria-live="polite">
+          <p class="status__message">Bitte melde dich mit deinen Zugangsdaten an.</p>
+        </section>
+        <section class="response" aria-live="polite">
+          <header class="response__header">
+            <h2>Token-Antwort</h2>
+            <button class="response__copy" id="copy-response" type="button">Kopieren</button>
+          </header>
+          <pre class="response__body" id="response-body">{}</pre>
+        </section>
+      </section>
+    </main>
+    <script>
+      const form = document.getElementById('login-form');
+      const statusBox = document.getElementById('status');
+      const statusMessage = statusBox.querySelector('.status__message');
+      const responseBody = document.getElementById('response-body');
+      const copyButton = document.getElementById('copy-response');
+      const passwordInput = document.getElementById('password');
+      const togglePassword = document.querySelector('.toggle-password');
+
+      function setStatus(message, type = 'info') {
+        statusBox.dataset.state = type;
+        statusMessage.textContent = message;
+      }
+
+      function formatResponse(data) {
+        try {
+          return JSON.stringify(data, null, 2);
+        } catch (error) {
+          return String(data);
+        }
+      }
+
+      togglePassword?.addEventListener('click', () => {
+        const isPassword = passwordInput.type === 'password';
+        passwordInput.type = isPassword ? 'text' : 'password';
+        togglePassword.setAttribute(
+          'aria-label',
+          isPassword ? 'Passwort verbergen' : 'Passwort anzeigen'
+        );
+        togglePassword.classList.toggle('toggle-password--visible', isPassword);
+      });
+
+      copyButton.addEventListener('click', async () => {
+        const text = responseBody.textContent;
+        try {
+          await navigator.clipboard.writeText(text);
+          copyButton.textContent = 'Kopiert';
+          setTimeout(() => {
+            copyButton.textContent = 'Kopieren';
+          }, 1500);
+        } catch (error) {
+          copyButton.textContent = 'Fehler';
+          setTimeout(() => {
+            copyButton.textContent = 'Kopieren';
+          }, 1500);
+        }
+      });
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        setStatus('Anmeldung wird durchgeführt …', 'info');
+        responseBody.textContent = '{}';
+
+        const formData = new FormData(form);
+        const payload = new URLSearchParams();
+        for (const [key, value] of formData.entries()) {
+          payload.append(key, value);
+        }
+
+        try {
+          const response = await fetch(form.action, {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: payload,
+          });
+
+          if (!response.ok) {
+            const errorPayload = await response.json().catch(() => ({}));
+            const message = errorPayload.detail || errorPayload.message || response.statusText;
+            setStatus(`Login fehlgeschlagen: ${message}`, 'error');
+            responseBody.textContent = formatResponse(errorPayload);
+            return;
+          }
+
+          const data = await response.json();
+          setStatus('Login erfolgreich. Tokens wurden generiert.', 'success');
+          responseBody.textContent = formatResponse(data);
+        } catch (error) {
+          setStatus(`Unerwarteter Fehler: ${error}`, 'error');
+        }
+      });
+    </script>
+  </body>
+</html>
