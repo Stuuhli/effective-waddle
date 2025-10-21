@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import Role, User, UserRole
 from .base import AsyncRepository
+from ...auth.constants import ROLE_EXCLUSIVE_GROUPS
 
 
 class UserRepository(AsyncRepository[User]):
@@ -30,20 +31,56 @@ class UserRepository(AsyncRepository[User]):
         hashed_password: str,
         full_name: str | None = None,
         roles: Sequence[Role] | None = None,
+        is_active: bool = True,
+        is_superuser: bool = False,
+        is_verified: bool = False,
     ) -> User:
-        user = User(email=email, hashed_password=hashed_password, full_name=full_name)
-        if roles:
-            user.roles.extend(roles)
+        user = User(
+            email=email,
+            hashed_password=hashed_password,
+            full_name=full_name,
+            is_active=is_active,
+            is_superuser=is_superuser,
+            is_verified=is_verified,
+        )
         await self.add(user)
+        if roles:
+            await self._assign_roles(user, roles)
         await self.commit()
         await self.session.refresh(user)
         return user
 
+    async def _assign_roles(self, user: User, roles: Sequence[Role]) -> None:
+        """Assign roles, removing mutually exclusive ones eagerly."""
+
+        await self.session.flush()
+        role_lookup = {role.name for role in roles}
+        for group in ROLE_EXCLUSIVE_GROUPS:
+            if not role_lookup.intersection(group):
+                continue
+            group_role_ids = select(Role.id).where(Role.name.in_(group)).scalar_subquery()
+            await self.session.execute(
+                UserRole.__table__
+                .delete()
+                .where(UserRole.user_id == user.id)
+                .where(UserRole.role_id.in_(group_role_ids))
+            )
+
+        existing = await self.session.execute(
+            select(UserRole.role_id).where(UserRole.user_id == user.id)
+        )
+        existing_role_ids = set(existing.scalars().all())
+
+        for role in roles:
+            if role.id in existing_role_ids:
+                continue
+            self.session.add(UserRole(user_id=user.id, role_id=role.id))
+        await self.session.flush()
+
     async def assign_role(self, user: User, role: Role) -> None:
-        if role not in user.roles:
-            user.roles.append(role)
-            await self.session.flush()
-            await self.commit()
+        await self._assign_roles(user, [role])
+        await self.session.flush()
+        await self.commit()
 
     async def get_role_by_name(self, name: str) -> Optional[Role]:
         stmt = select(Role).where(Role.name == name)

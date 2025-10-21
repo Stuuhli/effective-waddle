@@ -1,19 +1,32 @@
 """Constants used across the authentication package."""
 
 DEFAULT_ROLE_NAME = "user"
-DEFAULT_ROLE_DESCRIPTION = "Default user role"
+DEFAULT_ROLE_DESCRIPTION = "Default platform user role"
 ADMIN_ROLE_NAME = "admin"
+ADMIN_ROLE_DESCRIPTION = "Platform administrator"
+RAG_ROLE_NAME = "rag"
+RAG_ROLE_DESCRIPTION = "Core RAG feature access"
 GRAPH_RAG_ROLE_NAME = "graphrag"
+GRAPH_RAG_ROLE_DESCRIPTION = "GraphRAG feature access"
 ACCESS_TOKEN_TYPE = "access"
 REFRESH_TOKEN_TYPE = "refresh"
 OAUTH2_TOKEN_URL = "/auth/login"
+ROLE_EXCLUSIVE_GROUPS: tuple[tuple[str, ...], ...] = (
+    (RAG_ROLE_NAME, GRAPH_RAG_ROLE_NAME),
+    (DEFAULT_ROLE_NAME, ADMIN_ROLE_NAME),
+)
 
 __all__ = [
     "DEFAULT_ROLE_NAME",
     "DEFAULT_ROLE_DESCRIPTION",
     "ADMIN_ROLE_NAME",
+    "ADMIN_ROLE_DESCRIPTION",
+    "RAG_ROLE_NAME",
+    "RAG_ROLE_DESCRIPTION",
     "GRAPH_RAG_ROLE_NAME",
+    "GRAPH_RAG_ROLE_DESCRIPTION",
     "ACCESS_TOKEN_TYPE",
     "REFRESH_TOKEN_TYPE",
     "OAUTH2_TOKEN_URL",
+    "ROLE_EXCLUSIVE_GROUPS",
 ]

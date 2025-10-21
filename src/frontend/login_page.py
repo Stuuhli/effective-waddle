@@ -21,5 +21,8 @@ async def login_page(request: Request) -> HTMLResponse:
     """Render the custom login page."""
     return templates.TemplateResponse("login.html", {"request": request})
 
+async def chat_page(request: Request) -> HTMLResponse:
+    """Render a placeholder chat view."""
+    return templates.TemplateResponse("chat.html", {"request": request})
 
-__all__ = ["router", "STATIC_DIR"]
+__all__ = ["router", "STATIC_DIR", "chat_page"]

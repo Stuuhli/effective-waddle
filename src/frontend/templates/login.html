@@ -6,8 +6,9 @@
     <title>RAG Platform – Login</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link
@@ -16,16 +17,13 @@
     />
   </head>
   <body>
-    <div class="grain-overlay" aria-hidden="true"></div>
-    <div class="background-orb orb-left" aria-hidden="true"></div>
-    <div class="background-orb orb-right" aria-hidden="true"></div>
     <main class="page">
       <section class="card">
         <header class="card__header">
-          <div class="card__badge">RAG Platform</div>
-          <h1 class="card__title">Willkommen zurück</h1>
+          <div class="card__badge">KiRa - KISTERS RAG PLATFORM</div>
+          <h1 class="card__title">Welcome back</h1>
           <p class="card__subtitle">
-            Melde dich an, um Zugriff auf Admin-, Retrieval- und Ingestion-Funktionen zu erhalten.
+            Please log in to access admin, retrieval, and ingestion features.
           </p>
         </header>
         <form id="login-form" class="form" action="/auth/jwt/login" method="post">
@@ -53,20 +51,20 @@
                 autocomplete="current-password"
                 required
               />
-              <button class="toggle-password" type="button" aria-label="Passwort anzeigen">
+              <button class="toggle-password" type="button" aria-label="Show password">
                 <span class="toggle-password__icon" aria-hidden="true"></span>
               </button>
             </div>
           </div>
-          <button class="button" type="submit">Anmelden</button>
+          <button class="button" type="submit">Log in</button>
         </form>
         <section class="status" id="status" role="status" aria-live="polite">
-          <p class="status__message">Bitte melde dich mit deinen Zugangsdaten an.</p>
+          <p class="status__message">Please log in with your credentials.</p>
         </section>
         <section class="response" aria-live="polite">
           <header class="response__header">
-            <h2>Token-Antwort</h2>
-            <button class="response__copy" id="copy-response" type="button">Kopieren</button>
+            <h2>Token Response</h2>
+            <button class="response__copy" id="copy-response" type="button">Copy</button>
           </header>
           <pre class="response__body" id="response-body">{}</pre>
         </section>
@@ -75,15 +73,19 @@
     <script>
       const form = document.getElementById('login-form');
       const statusBox = document.getElementById('status');
-      const statusMessage = statusBox.querySelector('.status__message');
+      const statusMessage = statusBox ? statusBox.querySelector('.status__message') : null;
       const responseBody = document.getElementById('response-body');
       const copyButton = document.getElementById('copy-response');
       const passwordInput = document.getElementById('password');
       const togglePassword = document.querySelector('.toggle-password');
 
       function setStatus(message, type = 'info') {
-        statusBox.dataset.state = type;
-        statusMessage.textContent = message;
+        if (statusBox) {
+          statusBox.dataset.state = type;
+        }
+        if (statusMessage) {
+          statusMessage.textContent = message;
+        }
       }
 
       function formatResponse(data) {
@@ -94,68 +96,91 @@
         }
       }
 
-      togglePassword?.addEventListener('click', () => {
-        const isPassword = passwordInput.type === 'password';
-        passwordInput.type = isPassword ? 'text' : 'password';
-        togglePassword.setAttribute(
-          'aria-label',
-          isPassword ? 'Passwort verbergen' : 'Passwort anzeigen'
-        );
-        togglePassword.classList.toggle('toggle-password--visible', isPassword);
-      });
+      if (togglePassword && passwordInput) {
+        togglePassword.addEventListener('click', () => {
+          const isPassword = passwordInput.type === 'password';
+          passwordInput.type = isPassword ? 'text' : 'password';
+          togglePassword.setAttribute(
+            'aria-label',
+            isPassword ? 'Hide password' : 'Show password'
+          );
+          togglePassword.classList.toggle('toggle-password--visible', isPassword);
+        });
+      }
 
-      copyButton.addEventListener('click', async () => {
-        const text = responseBody.textContent;
-        try {
-          await navigator.clipboard.writeText(text);
-          copyButton.textContent = 'Kopiert';
-          setTimeout(() => {
-            copyButton.textContent = 'Kopieren';
-          }, 1500);
-        } catch (error) {
-          copyButton.textContent = 'Fehler';
-          setTimeout(() => {
-            copyButton.textContent = 'Kopieren';
-          }, 1500);
-        }
-      });
+      if (copyButton && responseBody) {
+        copyButton.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(responseBody.textContent || '{}');
+            copyButton.textContent = 'Copied';
+            setTimeout(() => {
+              copyButton.textContent = 'Copy';
+            }, 1500);
+          } catch (error) {
+            copyButton.textContent = 'Error';
+            setTimeout(() => {
+              copyButton.textContent = 'Copy';
+            }, 1500);
+          }
+        });
+      } else if (copyButton) {
+        copyButton.disabled = true;
+      }
 
-      form.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        setStatus('Anmeldung wird durchgeführt …', 'info');
-        responseBody.textContent = '{}';
+      if (!form) {
+        console.error('Login form not found. Unable to process login.');
+      } else {
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          setStatus('Logging in …', 'info');
+          if (responseBody) {
+            responseBody.textContent = '{}';
+          }
 
-        const formData = new FormData(form);
-        const payload = new URLSearchParams();
-        for (const [key, value] of formData.entries()) {
-          payload.append(key, value);
-        }
-
-        try {
-          const response = await fetch(form.action, {
-            method: 'POST',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: payload,
+          const formData = new FormData(form);
+          const payload = new URLSearchParams();
+          formData.forEach((value, key) => {
+            if (typeof value === 'string') {
+              payload.append(key, value);
+            }
           });
+          if (!payload.has('grant_type')) {
+            payload.append('grant_type', 'password');
+          }
 
-          if (!response.ok) {
-            const errorPayload = await response.json().catch(() => ({}));
-            const message = errorPayload.detail || errorPayload.message || response.statusText;
-            setStatus(`Login fehlgeschlagen: ${message}`, 'error');
-            responseBody.textContent = formatResponse(errorPayload);
-            return;
+          try {
+            const response = await fetch(form.action, {
+              method: 'POST',
+              headers: {
+                Accept: 'application/json',
+              },
+              credentials: 'same-origin',
+              body: payload,
+            });
+
+            if (!response.ok) {
+              const errorPayload = await response.json().catch(() => ({}));
+              const message = errorPayload.detail || errorPayload.message || response.statusText;
+              setStatus(`Login failed: ${message}`, 'error');
+              if (responseBody) {
+                responseBody.textContent = formatResponse(errorPayload);
+              }
+              return;
           }
 
           const data = await response.json();
-          setStatus('Login erfolgreich. Tokens wurden generiert.', 'success');
-          responseBody.textContent = formatResponse(data);
+          setStatus('Login successful. Tokens have been generated.', 'success');
+          if (responseBody) {
+            responseBody.textContent = formatResponse(data);
+          }
+          setTimeout(() => {
+            window.location.assign('/chat');
+          }, 600);
         } catch (error) {
-          setStatus(`Unerwarteter Fehler: ${error}`, 'error');
+          setStatus(`Unexpected error: ${error}`, 'error');
         }
       });
+      }
     </script>
   </body>
 </html>

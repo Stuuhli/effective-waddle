@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -77,6 +77,15 @@ class GraphRAGSettings(BaseModel):
     verbose: bool = False
 
 
+class BootstrapSettings(BaseModel):
+    """Bootstrap configuration for initial database seeding."""
+
+    admin_email: EmailStr = "admin@example.com"
+    admin_password: str = "ChangeMe123!"
+    admin_full_name: str = "Administrator"
+    admin_capability: Literal["rag", "graphrag"] = "rag"
+
+
 class Settings(BaseSettings):
     """Aggregate settings for the application."""
 
@@ -85,6 +94,7 @@ class Settings(BaseSettings):
     milvus: MilvusSettings = Field(default_factory=MilvusSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     graphrag: GraphRAGSettings = Field(default_factory=GraphRAGSettings)
+    bootstrap: BootstrapSettings = Field(default_factory=BootstrapSettings)
 
     model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", case_sensitive=False)
 
@@ -108,5 +118,6 @@ __all__ = [
     "MilvusSettings",
     "LLMSettings",
     "GraphRAGSettings",
+    "BootstrapSettings",
     "load_settings",
 ]

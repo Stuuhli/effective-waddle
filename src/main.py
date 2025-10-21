@@ -16,7 +16,7 @@ from .logging import setup_logging
 from .retrieval.router import router as retrieval_router
 from .ingestion.router import router as ingestion_router
 from .admin.router import router as admin_router
-from .frontend import STATIC_DIR, create_frontend, login_router
+from .frontend import STATIC_DIR, chat_page, create_frontend, login_router
 
 
 def create_app() -> FastAPI:
@@ -68,6 +68,7 @@ def create_app() -> FastAPI:
 
     app.mount("/frontend/static", StaticFiles(directory=STATIC_DIR), name="frontend_static")
     app.include_router(login_router, prefix="/frontend", tags=["frontend"])
+    app.add_api_route("/chat", chat_page, methods=["GET"], include_in_schema=False)
 
     gradio_app = create_frontend(settings)
     gr.mount_gradio_app(app, gradio_app, path="/frontend/console")

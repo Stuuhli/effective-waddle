@@ -117,6 +117,16 @@ leitet auf die Gradio-Oberfläche unter `/frontend/login` weiter. Dort meldest D
 Passwort an; der Login ruft die FastAPI-Auth-Route auf und speichert das JWT im Gradio-State. Erst
 danach werden die Ingestion-Steuerelemente freigeschaltet.
 
+### Seed sample data
+Um die Datenbank frisch aufzusetzen und einen initialen Admin-Benutzer inklusive aller Rollen zu
+erhalten, führe das Seed-Skript aus:
+
+```bash
+python scripts/seed_database.py
+```
+
+Die Zugangsdaten kannst Du über die `bootstrap`-Sektion in `.env` bzw. `src/config.py` anpassen.
+
 ### Background worker
 The ingestion worker polls the database for new jobs and should be launched alongside the API when you
 need document processing:

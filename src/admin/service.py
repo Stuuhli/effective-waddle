@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, status
 
-from ..auth.constants import GRAPH_RAG_ROLE_NAME
+from ..auth.constants import GRAPH_RAG_ROLE_NAME, RAG_ROLE_NAME
 from ..infrastructure.repositories.user_repo import UserRepository
 from .schemas import FeatureFlagUpdate, RoleAssignment, RoleCreate
 
@@ -37,10 +37,9 @@ class AdminService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         if payload.enable_graphrag:
             role = await self.user_repo.ensure_role(GRAPH_RAG_ROLE_NAME, "GraphRAG access")
-            await self.user_repo.assign_role(user, role)
         else:
-            user.roles = [role for role in user.roles if role.name != GRAPH_RAG_ROLE_NAME]
-            await self.user_repo.commit()
+            role = await self.user_repo.ensure_role(RAG_ROLE_NAME, "Core RAG access")
+        await self.user_repo.assign_role(user, role)
         return user
 
 
