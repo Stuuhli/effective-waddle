@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import Settings
 from ..dependencies import get_session_factory
 from ..infrastructure.database import IngestionJob, IngestionStatus
+from ..infrastructure.embeddings.local import LocalEmbeddingClient
 from ..infrastructure.repositories.document_repo import DocumentRepository
+from .exceptions import IngestionError
+from .pipeline import DoclingParser, DocumentIngestionPipeline
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,9 +35,15 @@ async def process_job(session: AsyncSession, job: IngestionJob) -> None:
     await repo.commit()
     try:
         LOGGER.info("Processing ingestion job %s from %s", job.id, job.source)
-        # Placeholder for Docling parsing and vector storage writes.
-        await asyncio.sleep(0.1)
+        parser = DoclingParser()
+        embedder = LocalEmbeddingClient()
+        pipeline = DocumentIngestionPipeline(repo, parser, embedder)
+        await pipeline.run(job)
         await repo.update_job_status(job, status=IngestionStatus.success)
+        await repo.commit()
+    except (IngestionError, FileNotFoundError) as exc:
+        LOGGER.warning("Ingestion job %s failed: %s", job.id, exc)
+        await repo.update_job_status(job, status=IngestionStatus.failed, error_message=str(exc))
         await repo.commit()
     except Exception as exc:  # noqa: BLE001
         LOGGER.exception("Ingestion job %s failed", job.id)

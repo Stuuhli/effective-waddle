@@ -1,4 +1,4 @@
-"""Milvus backed retrieval strategy."""
+"""Vector-store backed retrieval strategy."""
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
