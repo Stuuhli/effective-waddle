@@ -47,6 +47,7 @@ class DocumentRepository(AsyncRepository[Document]):
         vector_id: str | None = None,
         embedding_model: str | None = None,
         embedding: Sequence[float] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> Chunk:
         chunk = Chunk(
             document_id=document_id,
@@ -54,6 +55,7 @@ class DocumentRepository(AsyncRepository[Document]):
             vector_id=vector_id,
             embedding_model=embedding_model,
             embedding=list(embedding) if embedding is not None else None,
+            metadata_json=metadata,
         )
         self.session.add(chunk)
         await self.session.flush()

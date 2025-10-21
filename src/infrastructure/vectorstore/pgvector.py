@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any, Mapping
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,16 +19,20 @@ class PGVectorStore(VectorStoreClient):
         self.session = session
         self.embedder = embedder
 
-    async def similarity_search(self, query: str, *, k: int = 5) -> Sequence[str]:
+    async def similarity_search(self, query: str, *, k: int = 5) -> Sequence[Mapping[str, Any]]:
         query_vector = (await self.embedder.embed([query]))[0]
         stmt = (
-            select(Chunk.content)
+            select(Chunk.content, Chunk.metadata_json)
             .where(Chunk.embedding.isnot(None))
             .order_by(Chunk.embedding.cosine_distance(query_vector))
             .limit(k)
         )
         result = await self.session.execute(stmt)
-        return list(result.scalars())
+        rows = result.all()
+        documents: list[Mapping[str, Any]] = []
+        for content, metadata in rows:
+            documents.append({"content": content, "metadata": metadata or {}})
+        return documents
 
 
 __all__ = ["PGVectorStore"]

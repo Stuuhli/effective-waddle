@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import Settings
 from ..dependencies import get_session_factory
 from ..infrastructure.database import IngestionJob, IngestionStatus
-from ..infrastructure.embeddings.local import LocalEmbeddingClient
+from ..infrastructure.embeddings.factory import create_embedding_client
 from ..infrastructure.repositories.document_repo import DocumentRepository
 from .exceptions import IngestionError
 from .pipeline import DoclingParser, DocumentIngestionPipeline
@@ -29,14 +29,14 @@ async def _acquire_job(session: AsyncSession) -> IngestionJob | None:
     return result.scalars().first()
 
 
-async def process_job(session: AsyncSession, job: IngestionJob) -> None:
+async def process_job(session: AsyncSession, job: IngestionJob, settings: Settings) -> None:
     repo = DocumentRepository(session)
     await repo.update_job_status(job, status=IngestionStatus.running)
     await repo.commit()
     try:
         LOGGER.info("Processing ingestion job %s from %s", job.id, job.source)
         parser = DoclingParser()
-        embedder = LocalEmbeddingClient()
+        embedder = create_embedding_client(settings)
         pipeline = DocumentIngestionPipeline(repo, parser, embedder)
         await pipeline.run(job)
         await repo.update_job_status(job, status=IngestionStatus.success)
@@ -60,7 +60,7 @@ async def worker_loop(settings: Settings, poll_interval: float = 2.0) -> None:
                 if job is None:
                     await asyncio.sleep(poll_interval)
                     continue
-            await process_job(session, job)
+            await process_job(session, job, settings)
         await asyncio.sleep(0)
 
 

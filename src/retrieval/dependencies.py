@@ -7,7 +7,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session, get_settings
-from ..infrastructure.embeddings.local import LocalEmbeddingClient
+from ..infrastructure.embeddings.factory import create_embedding_client
 from ..infrastructure.llm.ollama import OllamaClient
 from ..infrastructure.llm.vllm import VLLMClient
 from ..infrastructure.repositories.conversation_repo import ConversationRepository
@@ -26,7 +26,7 @@ def _get_graph_rag_engine() -> GraphRAGQueryEngine:
 
 async def get_retrieval_service(session: AsyncSession = Depends(get_db_session)) -> RetrievalService:
     settings = get_settings()
-    embedder = LocalEmbeddingClient()
+    embedder = create_embedding_client(settings)
     vector_store = PGVectorStore(session, embedder)
     llm_client = OllamaClient(settings) if settings.llm.provider == "ollama" else VLLMClient(settings)
     rag_strategy = RAGStrategy(vector_store, llm_client)

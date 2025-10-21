@@ -5,7 +5,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from .exceptions import IngestionError
 from ..infrastructure.database import IngestionJob
@@ -17,12 +17,55 @@ LOGGER = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".json"}
 
 
+def _normalise_value(value: Any) -> object:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {str(key): _normalise_value(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_normalise_value(item) for item in value]
+    return str(value)
+
+
+def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, object]:
+    return {str(key): _normalise_value(value) for key, value in metadata.items()}
+
+
+def _extract_metadata(raw: Any) -> dict[str, object]:
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        items = raw.items()
+    elif hasattr(raw, "__dict__"):
+        items = vars(raw).items()
+    else:
+        return {}
+    return _sanitize_metadata({key: value for key, value in items if not str(key).startswith("_")})
+
+
+@dataclass(slots=True)
+class ParsedPage:
+    """Parsed representation of a single document page."""
+
+    number: int
+    content: str
+    metadata: dict[str, object]
+
+
 @dataclass(slots=True)
 class ParsedDocument:
     """Representation of a parsed document ready for chunking."""
 
     title: str
-    content: str
+    pages: list[ParsedPage]
+    metadata: dict[str, object]
+
+
+@dataclass(slots=True)
+class ChunkPayload:
+    """Chunk ready for embedding and persistence."""
+
+    text: str
     metadata: dict[str, object]
 
 
@@ -31,6 +74,40 @@ class DocumentParser(Protocol):
 
     async def parse(self, path: Path) -> list[ParsedDocument]:
         """Parse the given path into parsed documents."""
+
+
+def _extract_document_text(document: Any, path: Path) -> str:
+    if hasattr(document, "export_to_text"):
+        try:
+            return str(document.export_to_text())
+        except Exception:  # pragma: no cover - defensive
+            LOGGER.debug("export_to_text failed for %s", path, exc_info=True)
+    if hasattr(document, "to_text"):
+        try:
+            return str(document.to_text())
+        except Exception:  # pragma: no cover - defensive
+            LOGGER.debug("to_text failed for %s", path, exc_info=True)
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except UnicodeDecodeError as exc:  # pragma: no cover - depends on input
+        raise IngestionError(f"Unable to read {path} as UTF-8 text") from exc
+
+
+def _extract_page_text(page: Any) -> str:
+    for attr in ("text", "content", "plain_text"):
+        value = getattr(page, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value
+    for attr in ("export_to_text", "to_text"):
+        method = getattr(page, attr, None)
+        if callable(method):
+            try:
+                value = method()
+            except Exception:  # pragma: no cover - defensive
+                continue
+            if isinstance(value, str) and value.strip():
+                return value
+    return ""
 
 
 class DoclingParser:
@@ -69,26 +146,62 @@ class DoclingParser:
                 content = path.read_text(encoding="utf-8", errors="ignore")
             except UnicodeDecodeError as exc:  # pragma: no cover - depends on input
                 raise IngestionError(f"Unable to read {path} as UTF-8 text") from exc
-            return [ParsedDocument(title=path.stem, content=content, metadata={"source_path": str(path)})]
+            metadata = _sanitize_metadata({"source_path": str(path), "title": path.stem})
+            page = ParsedPage(number=1, content=content, metadata=metadata)
+            return [ParsedDocument(title=path.stem, pages=[page], metadata=metadata)]
 
         def _convert() -> list[ParsedDocument]:
             result = self._converter.convert(self._document_input(file_path=str(path)))
             document = result.document
-            if hasattr(document, "export_to_text"):
-                content = document.export_to_text()
-            elif hasattr(document, "to_text"):
-                content = document.to_text()
-            else:  # pragma: no cover - defensive
-                content = path.read_text(encoding="utf-8", errors="ignore")
+            title = None
             metadata_obj = getattr(document, "metadata", None)
-            title = getattr(metadata_obj, "title", None) if metadata_obj else None
+            if metadata_obj is not None:
+                title = getattr(metadata_obj, "title", None)
             if not title:
                 title = getattr(document, "title", None)
             title = title or path.stem
-            metadata: dict[str, object] = {"source_path": str(path)}
-            if hasattr(result, "metadata") and isinstance(result.metadata, dict):
-                metadata.update(result.metadata)
-            return [ParsedDocument(title=title, content=content, metadata=metadata)]
+
+            document_metadata: dict[str, object] = {"source_path": str(path), "title": title}
+            document_metadata.update(_extract_metadata(getattr(result, "metadata", None)))
+            document_metadata.update(_extract_metadata(metadata_obj))
+            document_metadata = _sanitize_metadata(document_metadata)
+
+            pages: list[ParsedPage] = []
+            raw_pages = []
+            if hasattr(result, "pages"):
+                raw_pages = getattr(result, "pages") or []
+            elif hasattr(document, "pages"):
+                raw_pages = getattr(document, "pages") or []
+
+            for index, page in enumerate(raw_pages, start=1):
+                page_text = _extract_page_text(page)
+                if not page_text.strip():
+                    continue
+                raw_number = getattr(page, "page_no", None) or getattr(page, "number", None)
+                try:
+                    number = int(raw_number) if raw_number is not None else index
+                except (TypeError, ValueError):
+                    number = index
+                page_meta: dict[str, object] = {
+                    "source_path": str(path),
+                    "document_title": title,
+                }
+                page_meta.update(_extract_metadata(getattr(page, "metadata", None)))
+                page_meta.update(_extract_metadata(getattr(page, "attrs", None)))
+                pages.append(
+                    ParsedPage(
+                        number=number,
+                        content=page_text,
+                        metadata=_sanitize_metadata(page_meta),
+                    )
+                )
+
+            if not pages:
+                content = _extract_document_text(document, path)
+                metadata = _sanitize_metadata({"source_path": str(path), "title": title})
+                pages.append(ParsedPage(number=1, content=content, metadata=metadata))
+
+            return [ParsedDocument(title=title, pages=pages, metadata=document_metadata)]
 
         return await asyncio.to_thread(_convert)
 
@@ -122,26 +235,67 @@ class DocumentIngestionPipeline:
             LOGGER.info("Parsing document %s", path)
             parsed_documents = await self.parser.parse(path)
             for parsed in parsed_documents:
+                document_metadata = dict(parsed.metadata)
+                document_metadata["ingestion_job_id"] = job.id
+                document_metadata = _sanitize_metadata(document_metadata)
                 document = await self.repository.create_document(
                     title=parsed.title or path.stem,
                     source_path=str(path),
                     collection_name=job.collection_name,
-                    metadata={**parsed.metadata, "ingestion_job_id": job.id},
+                    metadata=document_metadata,
                     job=job,
                 )
-                chunks = list(self._chunk_text(parsed.content))
-                if not chunks:
+
+                chunk_payloads = self._prepare_chunks(parsed, document.id, path, job)
+                if not chunk_payloads:
                     LOGGER.debug("Document %s produced no chunks", path)
                     continue
-                embeddings = await self.embedder.embed(chunks)
-                for chunk_text, vector in zip(chunks, embeddings):
+
+                embeddings = await self.embedder.embed([chunk.text for chunk in chunk_payloads])
+                total_chunks = len(chunk_payloads)
+                for chunk, vector in zip(chunk_payloads, embeddings):
+                    chunk.metadata.setdefault("chunk_count", total_chunks)
                     await self.repository.add_chunk(
                         document_id=document.id,
-                        content=chunk_text,
+                        content=chunk.text,
                         embedding_model=getattr(self.embedder, "model_name", None),
                         embedding=vector,
+                        metadata=_sanitize_metadata(chunk.metadata),
                     )
                 await self.repository.commit()
+
+    def _prepare_chunks(
+        self,
+        parsed: ParsedDocument,
+        document_id: str,
+        path: Path,
+        job: IngestionJob,
+    ) -> list[ChunkPayload]:
+        chunk_payloads: list[ChunkPayload] = []
+        chunk_index = 0
+        for page in parsed.pages:
+            for page_chunk_index, (chunk_text, start_word, end_word) in enumerate(self._chunk_text(page.content), start=1):
+                if not chunk_text.strip():
+                    continue
+                chunk_index += 1
+                chunk_metadata: dict[str, object] = {
+                    "document_id": document_id,
+                    "document_title": parsed.title,
+                    "source_path": str(path),
+                    "collection_name": job.collection_name,
+                    "ingestion_job_id": job.id,
+                    "page_number": page.number,
+                    "page_chunk_index": page_chunk_index,
+                    "chunk_index": chunk_index,
+                    "word_start": start_word,
+                    "word_end": end_word,
+                }
+                if parsed.metadata:
+                    chunk_metadata["document_metadata"] = parsed.metadata
+                if page.metadata:
+                    chunk_metadata["page_metadata"] = page.metadata
+                chunk_payloads.append(ChunkPayload(text=chunk_text, metadata=chunk_metadata))
+        return chunk_payloads
 
     def _collect_sources(self, source: str) -> list[Path]:
         path = Path(source).expanduser().resolve()
@@ -154,19 +308,25 @@ class DocumentIngestionPipeline:
     def _is_supported(self, path: Path) -> bool:
         return path.suffix.lower() in self.allowed_extensions
 
-    def _chunk_text(self, text: str) -> list[str]:
+    def _chunk_text(self, text: str) -> list[tuple[str, int, int]]:
         words = text.split()
         if not words:
             return []
         step = max(self.chunk_size - self.chunk_overlap, 1)
-        chunks: list[str] = []
+        chunks: list[tuple[str, int, int]] = []
         for start in range(0, len(words), step):
-            end = start + self.chunk_size
+            end = min(start + self.chunk_size, len(words))
             chunk_words = words[start:end]
             if not chunk_words:
                 continue
-            chunks.append(" ".join(chunk_words))
+            chunks.append((" ".join(chunk_words), start, end))
         return chunks
 
 
-__all__ = ["DocumentIngestionPipeline", "DoclingParser", "ParsedDocument"]
+__all__ = [
+    "ChunkPayload",
+    "DocumentIngestionPipeline",
+    "DoclingParser",
+    "ParsedDocument",
+    "ParsedPage",
+]

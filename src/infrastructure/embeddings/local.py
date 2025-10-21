@@ -7,13 +7,13 @@ import math
 import random
 from collections.abc import Sequence
 
-from .base import EmbeddingClient
+from .base import EMBEDDING_DIMENSION, EmbeddingClient
 
 
 class LocalEmbeddingClient(EmbeddingClient):
     """Generate deterministic pseudo-embeddings for text."""
 
-    def __init__(self, *, dimension: int = 768) -> None:
+    def __init__(self, *, dimension: int = EMBEDDING_DIMENSION) -> None:
         self.dimension = dimension
         self.model_name = "local-deterministic-embedding"
 

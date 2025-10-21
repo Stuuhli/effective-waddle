@@ -18,10 +18,12 @@ def upgrade() -> None:
     """Create the pgvector extension and store embeddings on chunks."""
 
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    op.add_column("chunks", sa.Column("embedding", Vector(768), nullable=True))
+    op.add_column("chunks", sa.Column("metadata_json", sa.JSON(), nullable=True))
+    op.add_column("chunks", sa.Column("embedding", Vector(1536), nullable=True))
 
 
 def downgrade() -> None:
     """Remove the chunk embedding column."""
 
     op.drop_column("chunks", "embedding")
+    op.drop_column("chunks", "metadata_json")
