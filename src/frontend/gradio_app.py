@@ -101,6 +101,13 @@ def create_frontend(settings: Settings) -> gr.Blocks:
         base_url: str,
         state: Dict[str, str],
     ) -> tuple[str, Dict[str, str], Any, Any, Any, Any]:
+        """Authenticate the user and persist the resulting tokens in the shared state.
+
+        Gradio passes the current value of :class:`gr.State` as ``state``; the handler
+        returns an updated tuple whose second element becomes the new state.  On
+        success we enable the ingestion controls and show the API response.  On
+        failure the previous state is kept and the form stays disabled.
+        """
         empty_json = gr.update(value="{}", interactive=False)
         if not email or not password:
             return (
@@ -157,6 +164,7 @@ def create_frontend(settings: Settings) -> gr.Blocks:
         )
 
     def logout_action(state: Dict[str, str]) -> tuple[str, Dict[str, str], Any, Any, Any, Any]:
+        """Reset the stored tokens and disable ingestion controls."""
         empty = {"access": "", "refresh": "", "base_url": state.get("base_url", DEFAULT_BASE_URL)}
         return (
             _status_message("ℹ️ Abgemeldet.", "info"),
@@ -168,6 +176,7 @@ def create_frontend(settings: Settings) -> gr.Blocks:
         )
 
     def ingestion_action(source: str, collection: str, state: Dict[str, str]) -> tuple[str, str]:
+        """Trigger a new ingestion job for the authenticated user."""
         access = state.get("access")
         base = _normalise_base_url(state.get("base_url"))
         if not access:
