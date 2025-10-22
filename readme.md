@@ -48,7 +48,7 @@ pip-sync requirements/base.txt
 pip-sync requirements/dev.txt
 ```
 
-If you add new packages, update the relevant `.in` file and regenerate the lockfiles:
+If you add new packages, update the relevant `.in` file, delete the corresponding `.txt` file and regenerate them using the `pip-compile` command
 
 
 
