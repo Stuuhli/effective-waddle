@@ -1,11 +1,12 @@
 """Ingestion pipeline utilities for parsing, chunking and embedding documents."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 import logging
-import asyncio
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -20,6 +21,11 @@ from ..infrastructure.database import IngestionEventStatus, IngestionStep
 LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".json"}
+
+_DATA_URI_RE = re.compile(r"data:image/[\w.+-]+;base64,[A-Za-z0-9+/=\s]+")
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(data:image/[^)]+\)")
+_HTML_IMAGE_RE = re.compile(r"<img\\b[^>]*src=\"data:image/[^\"]+\"[^>]*>", re.IGNORECASE)
+_MAX_WORD_CHARS = 4096
 
 
 def _normalise_value(value: Any) -> object:
@@ -113,6 +119,36 @@ def _extract_page_text(page: Any) -> str:
             if isinstance(value, str) and value.strip():
                 return value
     return ""
+
+
+def _sanitize_page_text(text: str) -> str:
+    """Remove large binary payloads such as inline data URIs from page text."""
+
+    if not text:
+        return ""
+
+    cleaned = _MARKDOWN_IMAGE_RE.sub(" ", text)
+    cleaned = _HTML_IMAGE_RE.sub(" ", cleaned)
+    cleaned = _DATA_URI_RE.sub(" ", cleaned)
+    cleaned = cleaned.replace("<!-- image -->", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _split_long_tokens(words: list[str], *, max_length: int = _MAX_WORD_CHARS) -> list[str]:
+    """Ensure extremely long tokens are broken into manageable segments."""
+
+    if not words:
+        return []
+
+    result: list[str] = []
+    for word in words:
+        if len(word) <= max_length:
+            result.append(word)
+            continue
+        for index in range(0, len(word), max_length):
+            result.append(word[index : index + max_length])
+    return result
 
 
 class DoclingParser:
@@ -349,7 +385,7 @@ class DoclingParser:
                 raw_pages = list(raw_pages.values())
 
             for index, page in enumerate(raw_pages, start=1):
-                page_text = _extract_page_text(page)
+                page_text = _sanitize_page_text(_extract_page_text(page))
                 if not page_text.strip():
                     continue
                 raw_number = getattr(page, "page_no", None) or getattr(page, "number", None)
@@ -381,7 +417,7 @@ class DoclingParser:
                 )
 
             if not pages:
-                content = _extract_document_text(document, path)
+                content = _sanitize_page_text(_extract_document_text(document, path))
                 metadata = _sanitize_metadata(
                     {
                         "source_path": str(path),
@@ -653,7 +689,7 @@ class DocumentIngestionPipeline:
     def _chunk_text(
         self, text: str, *, chunk_size: int, chunk_overlap: int
     ) -> list[tuple[str, int, int]]:
-        words = text.split()
+        words = _split_long_tokens(text.split())
         if not words:
             return []
         step = max(chunk_size - chunk_overlap, 1)
