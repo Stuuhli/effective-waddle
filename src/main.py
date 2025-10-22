@@ -1,7 +1,6 @@
 """FastAPI application factory."""
 from __future__ import annotations
 
-import gradio as gr
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -9,14 +8,14 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import dependencies
+from .admin.router import router as admin_router
 from .auth.dependencies import configure_auth, get_auth_backend_instance
 from .auth.models import UserCreate, UserRead, UserUpdate
 from .auth.router import router as auth_router
+from .frontend import STATIC_DIR, login_router
+from .ingestion.router import router as ingestion_router
 from .logging import setup_logging
 from .retrieval.router import router as retrieval_router
-from .ingestion.router import router as ingestion_router
-from .admin.router import router as admin_router
-from .frontend import STATIC_DIR, create_frontend, login_router
 
 
 def create_app() -> FastAPI:
@@ -68,18 +67,12 @@ def create_app() -> FastAPI:
 
     app.mount("/frontend/static", StaticFiles(directory=STATIC_DIR), name="frontend_static")
     app.include_router(login_router, prefix="/frontend", tags=["frontend"])
-    gradio_app = create_frontend(settings)
-    gr.mount_gradio_app(app, gradio_app, path="/frontend/console")
 
     async def redirect_to_frontend() -> RedirectResponse:
         return RedirectResponse(url="/frontend/login", status_code=307)
 
-    async def redirect_to_gradio() -> RedirectResponse:
-        return RedirectResponse(url="/frontend/console", status_code=307)
-
     app.add_api_route("/", redirect_to_frontend, include_in_schema=False)
     app.add_api_route("/frontend", redirect_to_frontend, include_in_schema=False)
-    app.add_api_route("/frontend/gradio", redirect_to_gradio, include_in_schema=False)
 
     return app
 
