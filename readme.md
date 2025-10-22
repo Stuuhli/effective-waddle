@@ -195,7 +195,7 @@ vectors in PostgreSQL using `pgvector`.
    ```
 
    A `success` status indicates that all chunks have been written with metadata such as
-   `page_number`, `page_chunk_index`, `chunk_index`, `word_start`, `word_end`, and optional Docling
+   `page_number`, `page_chunk_index`, `chunk_index`, `char_start`, `char_end`, and optional Docling
    metadata copied into the `metadata_json` column.
 
 5. **Query collections** – list known collections to drive retrieval prompts or UI dropdowns:

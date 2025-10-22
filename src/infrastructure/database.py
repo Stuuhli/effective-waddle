@@ -214,7 +214,7 @@ class IngestionJob(TimestampMixin, Base):
     )
     source: Mapped[str] = mapped_column(String(255), nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
-    chunk_size: Mapped[int] = mapped_column(Integer, default=750, nullable=False)
+    chunk_size: Mapped[int] = mapped_column(Integer, default=1200, nullable=False)
     chunk_overlap: Mapped[int] = mapped_column(Integer, default=150, nullable=False)
     parameters: Mapped[dict[str, object] | None] = mapped_column(JSON)
 

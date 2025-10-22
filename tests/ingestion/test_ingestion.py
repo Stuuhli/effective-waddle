@@ -37,7 +37,7 @@ def test_ingestion_job_lifecycle(app: FastAPI, session_factory: async_sessionmak
                 assert create_job_1.status_code == 201
                 job_one = create_job_1.json()
                 assert job_one["status"] == IngestionStatus.pending.value
-                assert job_one["chunk_size"] == 750
+                assert job_one["chunk_size"] == 1200
                 assert job_one["chunk_overlap"] == 150
                 assert job_one["metadata"] is None
                 assert job_one["collection_name"] == "compliance"

@@ -81,7 +81,7 @@ class BootstrapSettings(BaseModel):
 class ChunkingSettings(BaseModel):
     """Defaults for document chunking."""
 
-    default_size: int = 750
+    default_size: int = 1200
     default_overlap: int = 150
 
 

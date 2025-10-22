@@ -18,7 +18,7 @@ def upgrade() -> None:
 
     op.add_column(
         "ingestion_jobs",
-        sa.Column("chunk_size", sa.Integer(), nullable=False, server_default="750"),
+        sa.Column("chunk_size", sa.Integer(), nullable=False, server_default="1200"),
     )
     op.add_column(
         "ingestion_jobs",

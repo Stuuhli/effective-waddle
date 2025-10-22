@@ -1,11 +1,12 @@
 """Ingestion pipeline utilities for parsing, chunking and embedding documents."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 import logging
-import asyncio
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -21,6 +22,10 @@ LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".json"}
 
+_DATA_URI_RE = re.compile(r"data:image/[\w.+-]+;base64,[A-Za-z0-9+/=\s]+")
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(data:image/[^)]+\)")
+_HTML_IMAGE_RE = re.compile(r"<img\\b[^>]*src=\"data:image/[^\"]+\"[^>]*>", re.IGNORECASE)
+_MAX_WORD_CHARS = 4096
 
 def _normalise_value(value: Any) -> object:
     if isinstance(value, (str, int, float, bool)) or value is None:
@@ -113,6 +118,35 @@ def _extract_page_text(page: Any) -> str:
             if isinstance(value, str) and value.strip():
                 return value
     return ""
+
+def _sanitize_page_text(text: str) -> str:
+    """Remove large binary payloads such as inline data URIs from page text."""
+
+    if not text:
+        return ""
+
+    cleaned = _MARKDOWN_IMAGE_RE.sub(" ", text)
+    cleaned = _HTML_IMAGE_RE.sub(" ", cleaned)
+    cleaned = _DATA_URI_RE.sub(" ", cleaned)
+    cleaned = cleaned.replace("<!-- image -->", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _split_long_tokens(words: list[str], *, max_length: int = _MAX_WORD_CHARS) -> list[str]:
+    """Ensure extremely long tokens are broken into manageable segments."""
+
+    if not words:
+        return []
+
+    result: list[str] = []
+    for word in words:
+        if len(word) <= max_length:
+            result.append(word)
+            continue
+        for index in range(0, len(word), max_length):
+            result.append(word[index : index + max_length])
+    return result
 
 
 class DoclingParser:
@@ -211,6 +245,57 @@ class DoclingParser:
             return base64.b64decode(data)
         except base64.binascii.Error:  # pragma: no cover - defensive
             return None
+
+    @staticmethod
+    def _image_extension(mimetype: str | None) -> str:
+        if not mimetype or "/" not in mimetype:
+            return ".png"
+        subtype = mimetype.split("/", 1)[1].lower()
+        if subtype in {"jpeg", "jpg"}:
+            return ".jpg"
+        if subtype in {"png", "gif", "webp", "bmp"}:
+            return f".{subtype}"
+        return ".png"
+
+    def _export_page_images(self, json_path: Path, cache_dir: Path) -> dict[int, str]:
+        page_images: dict[int, str] = {}
+        try:
+            raw = json.loads(json_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):  # pragma: no cover - defensive
+            return page_images
+
+        pages = raw.get("pages")
+        if not isinstance(pages, dict):
+            return page_images
+
+        for key, page_info in pages.items():
+            if not isinstance(page_info, dict):
+                continue
+
+            image_info = page_info.get("image")
+            if not isinstance(image_info, dict):
+                continue
+            uri = image_info.get("uri")
+            if not isinstance(uri, str):
+                continue
+            mimetype = image_info.get("mimetype")
+            extension = self._image_extension(mimetype if isinstance(mimetype, str) else None)
+            raw_number = page_info.get("page_no", key)
+            try:
+                number = int(raw_number)
+            except (TypeError, ValueError):
+                try:
+                    number = int(key)
+                except (TypeError, ValueError):
+                    continue
+            image_path = cache_dir / f"page-{number}{extension}"
+            if not image_path.exists():
+                image_bytes = self._decode_image(uri)
+                if not image_bytes:
+                    continue
+                image_path.write_bytes(image_bytes)
+            page_images[number] = str(image_path)
+        return page_images
 
     @staticmethod
     def _serialize_markdown(document: Any) -> str | None:
@@ -315,6 +400,8 @@ class DoclingParser:
                 hash_index[str(path)] = file_hash
                 self._save_hash_index(hash_index)
 
+            page_images = self._export_page_images(json_path, cache_dir)
+
             title = None
             metadata_obj = getattr(document, "metadata", None)
             if metadata_obj is not None:
@@ -349,7 +436,7 @@ class DoclingParser:
                 raw_pages = list(raw_pages.values())
 
             for index, page in enumerate(raw_pages, start=1):
-                page_text = _extract_page_text(page)
+                page_text = _sanitize_page_text(_extract_page_text(page))
                 if not page_text.strip():
                     continue
                 raw_number = getattr(page, "page_no", None) or getattr(page, "number", None)
@@ -365,13 +452,32 @@ class DoclingParser:
                 }
                 page_meta.update(_extract_metadata(getattr(page, "metadata", None)))
                 page_meta.update(_extract_metadata(getattr(page, "attrs", None)))
-                image_uri = getattr(getattr(page, "image", None), "uri", None)
-                if image_uri:
-                    image_bytes = self._decode_image(str(image_uri))
-                    if image_bytes:
-                        image_path = cache_dir / f"page-{number}.png"
-                        image_path.write_bytes(image_bytes)
-                        page_meta["image_path"] = str(image_path)
+                image_path_value: str | None = page_images.get(number)
+                image_attr = getattr(page, "image", None)
+                image_uri: str | None = None
+                image_mimetype: str | None = None
+                if isinstance(image_attr, dict):
+                    image_uri = image_attr.get("uri")
+                    image_mimetype = image_attr.get("mimetype")
+                else:
+                    image_uri = getattr(image_attr, "uri", None)
+                    image_mimetype = getattr(image_attr, "mimetype", None)
+                if not image_path_value and image_uri:
+                    extension = self._image_extension(
+                        image_mimetype if isinstance(image_mimetype, str) else None
+                    )
+                    image_path = cache_dir / f"page-{number}{extension}"
+                    if image_path.exists():
+                        image_path_value = str(image_path)
+                    else:
+                        image_bytes = self._decode_image(str(image_uri))
+                        if image_bytes:
+                            image_path.write_bytes(image_bytes)
+                            image_path_value = str(image_path)
+                    if image_path_value:
+                        page_images[number] = image_path_value
+                if image_path_value:
+                    page_meta["image_path"] = image_path_value
                 pages.append(
                     ParsedPage(
                         number=number,
@@ -381,7 +487,7 @@ class DoclingParser:
                 )
 
             if not pages:
-                content = _extract_document_text(document, path)
+                content = _sanitize_page_text(_extract_document_text(document, path))
                 metadata = _sanitize_metadata(
                     {
                         "source_path": str(path),
@@ -408,7 +514,7 @@ class DocumentIngestionPipeline:
         parser: DocumentParser,
         embedder: EmbeddingClient,
         *,
-        chunk_size: int = 750,
+        chunk_size: int = 1200,
         chunk_overlap: int = 150,
         allowed_extensions: set[str] | None = None,
     ) -> None:
@@ -602,7 +708,7 @@ class DocumentIngestionPipeline:
         chunk_payloads: list[ChunkPayload] = []
         chunk_index = 0
         for page in parsed.pages:
-            for page_chunk_index, (chunk_text, start_word, end_word) in enumerate(
+            for page_chunk_index, (chunk_text, start_char, end_char) in enumerate(
                 self._chunk_text(page.content, chunk_size=chunk_size, chunk_overlap=chunk_overlap),
                 start=1,
             ):
@@ -618,8 +724,8 @@ class DocumentIngestionPipeline:
                     "page_number": page.number,
                     "page_chunk_index": page_chunk_index,
                     "chunk_index": chunk_index,
-                    "word_start": start_word,
-                    "word_end": end_word,
+                    "char_start": start_char,
+                    "char_end": end_char,
                     "chunk_size": chunk_size,
                     "chunk_overlap": chunk_overlap,
                 }
@@ -653,17 +759,28 @@ class DocumentIngestionPipeline:
     def _chunk_text(
         self, text: str, *, chunk_size: int, chunk_overlap: int
     ) -> list[tuple[str, int, int]]:
-        words = text.split()
-        if not words:
+        if not text:
             return []
+
+        chunk_size = max(chunk_size, 1)
+        chunk_overlap = max(chunk_overlap, 0)
+        if chunk_overlap >= chunk_size:
+            chunk_overlap = chunk_size - 1
         step = max(chunk_size - chunk_overlap, 1)
+
         chunks: list[tuple[str, int, int]] = []
-        for start in range(0, len(words), step):
-            end = min(start + chunk_size, len(words))
-            chunk_words = words[start:end]
-            if not chunk_words:
-                continue
-            chunks.append((" ".join(chunk_words), start, end))
+        length = len(text)
+        start = 0
+
+        while start < length:
+            end = min(start + chunk_size, length)
+            chunk_text = text[start:end]
+            if chunk_text.strip():
+                chunks.append((chunk_text, start, end))
+            if end == length:
+                break
+            start += step
+
         return chunks
 
 
