@@ -4,7 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -39,7 +39,8 @@ def _image_extension(mimetype: str | None) -> str:
 class DoclingImageLocator:
     """Resolve Docling page preview images on demand."""
 
-    storage: StorageSettings = StorageSettings()
+    storage: StorageSettings = field(default_factory=StorageSettings)
+    _docling_dir: Path = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._docling_dir = Path(self.storage.docling_output_dir).resolve()
