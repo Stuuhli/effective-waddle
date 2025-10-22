@@ -35,9 +35,16 @@ async def process_job(session: AsyncSession, job: IngestionJob, settings: Settin
     await repo.commit()
     try:
         LOGGER.info("Processing ingestion job %s from %s", job.id, job.source)
-        parser = DoclingParser()
+        await session.refresh(job, attribute_names=["collection", "events"])
+        parser = DoclingParser(storage_settings=settings.storage)
         embedder = create_embedding_client(settings)
-        pipeline = DocumentIngestionPipeline(repo, parser, embedder)
+        pipeline = DocumentIngestionPipeline(
+            repo,
+            parser,
+            embedder,
+            chunk_size=settings.chunking.default_size,
+            chunk_overlap=settings.chunking.default_overlap,
+        )
         await pipeline.run(job)
         await repo.update_job_status(job, status=IngestionStatus.success)
         await repo.commit()

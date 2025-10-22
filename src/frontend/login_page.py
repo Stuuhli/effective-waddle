@@ -9,7 +9,10 @@ from fastapi.templating import Jinja2Templates
 
 from ..auth.dependencies import get_auth_backend_instance
 from ..auth.user_manager import get_user_manager, UserManager
-from ..infrastructure.database import User
+from ..infrastructure.database import IngestionJob, User
+from ..config import load_settings
+from ..ingestion.dependencies import get_ingestion_service
+from ..ingestion.service import IngestionService
 
 
 async def _current_user_from_cookie(
@@ -57,32 +60,43 @@ async def chat_page(request: Request, user: User = Depends(_current_user_from_co
 
 
 @router.get("/ingestion", response_class=HTMLResponse, include_in_schema=False)
-async def ingestion_page(request: Request, user: User = Depends(_current_user_from_cookie)) -> HTMLResponse:
+async def ingestion_page(
+    request: Request,
+    user: User = Depends(_current_user_from_cookie),
+    service: IngestionService = Depends(get_ingestion_service),
+) -> HTMLResponse:
     """Render the ingestion workflow workspace."""
     is_admin = any(role.name == "admin" for role in user.roles)
+    settings = load_settings()
+    collections = await service.collection_summaries(list(user.roles))
+    jobs = await service.list_jobs_for_user(None if user.is_superuser else user.id, limit=20)
+    def _job_source(job: IngestionJob) -> str:
+        parameters = job.parameters or {}
+        if isinstance(parameters, dict):
+            original = parameters.get("original_filename")
+            if isinstance(original, str) and original.strip():
+                return original.strip()
+        return job.source
+
+    recent_jobs = [
+        {
+            "id": job.id,
+            "source": _job_source(job),
+            "collection": job.collection.name if job.collection else "unknown",
+            "status": job.status.value,
+            "updated_at": job.updated_at.strftime("%Y-%m-%d %H:%M"),
+        }
+        for job in jobs
+    ]
     context = {
         "request": request,
         "is_admin": is_admin,
-        "collections": [
-            {"name": "documents", "document_count": 128},
-            {"name": "product-guides", "document_count": 56},
-        ],
-        "recent_jobs": [
-            {
-                "id": "job-1",
-                "source": "s3://bucket/onboarding.pdf",
-                "collection": "documents",
-                "status": "completed",
-                "updated_at": "5 minutes ago",
-            },
-            {
-                "id": "job-2",
-                "source": "/uploads/support-handbook.pdf",
-                "collection": "product-guides",
-                "status": "processing",
-                "updated_at": "18 minutes ago",
-            },
-        ],
+        "collections": collections,
+        "recent_jobs": recent_jobs,
+        "chunk_defaults": {
+            "size": settings.chunking.default_size,
+            "overlap": settings.chunking.default_overlap,
+        },
     }
     return templates.TemplateResponse("ingestion.html", context)
 

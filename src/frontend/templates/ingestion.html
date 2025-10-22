@@ -56,17 +56,39 @@
           <div class="config__grid">
             <label class="config__field">
               <span>Chunk size (tokens)</span>
-              <input type="number" name="chunk_size" value="750" min="100" max="2000" step="50" required />
+              <input
+                type="number"
+                name="chunk_size"
+                value="{{ chunk_defaults.size }}"
+                min="100"
+                max="2000"
+                step="50"
+                required
+              />
             </label>
             <label class="config__field">
               <span>Chunk overlap (tokens)</span>
-              <input type="number" name="chunk_overlap" value="150" min="0" max="500" step="10" required />
+              <input
+                type="number"
+                name="chunk_overlap"
+                value="{{ chunk_defaults.overlap }}"
+                min="0"
+                max="500"
+                step="10"
+                required
+              />
             </label>
             <label class="config__field">
               <span>Collection</span>
               <select name="collection" id="collection-select" required>
                 {% for collection in collections %}
-                  <option value="{{ collection.name }}">{{ collection.name }} • {{ collection.document_count }} docs</option>
+                  <option
+                    value="{{ collection.name }}"
+                    data-default-size="{{ collection.default_chunk_size }}"
+                    data-default-overlap="{{ collection.default_chunk_overlap }}"
+                  >
+                    {{ collection.name }} • {{ collection.document_count }} docs
+                  </option>
                 {% endfor %}
               </select>
             </label>
@@ -212,6 +234,25 @@
       }
       let pipelineTimer = null;
 
+      document.getElementById('collection-select')?.addEventListener('change', (event) => {
+        const select = event.target;
+        if (!(select instanceof HTMLSelectElement)) {
+          return;
+        }
+        const option = select.selectedOptions[0];
+        if (!option) {
+          return;
+        }
+        const size = Number(option.dataset.defaultSize);
+        const overlap = Number(option.dataset.defaultOverlap);
+        if (size) {
+          configForm.elements.namedItem('chunk_size').value = String(size);
+        }
+        if (overlap >= 0) {
+          configForm.elements.namedItem('chunk_overlap').value = String(overlap);
+        }
+      });
+
       function updateQueueView() {
         fileList.innerHTML = '';
         if (!queue.length) {
@@ -313,94 +354,137 @@
         resetPipeline();
       });
 
-      function simulateWorkflow(config) {
-        const steps = [
-          {
-            id: 'docling',
-            duration: 1500,
-            onComplete: () => {
-              previewDocling.textContent = JSON.stringify({
-                parser: 'docling',
-                blocks: 342,
-                tables: config.include_tables ? 12 : 0,
-                duration_ms: 1340,
-              }, null, 2);
-            },
-          },
-          {
-            id: 'chunking',
-            duration: 1300,
-            onComplete: () => {
-              previewChunks.textContent = JSON.stringify({
-                chunk_size: config.chunk_size,
-                chunk_overlap: config.chunk_overlap,
-                total_chunks: Math.max(12, Math.floor(Math.random() * 21) + 8),
-              }, null, 2);
-            },
-          },
-          {
-            id: 'embeddings',
-            duration: 1800,
-            onComplete: () => {
-              previewChunks.textContent = JSON.stringify({
-                ...JSON.parse(previewChunks.textContent || '{}'),
-                embeddings_model: 'text-embedding-3-large',
-                vector_store: config.collection,
-              }, null, 2);
-            },
-          },
-          {
-            id: 'citations',
-            duration: 1200,
-            onComplete: () => {
-              if (!config.generate_citations) {
-                previewCitations.textContent = JSON.stringify({ disabled: true }, null, 2);
-                return;
-              }
-              previewCitations.textContent = JSON.stringify({
-                total_citations: Math.floor(Math.random() * 15) + 3,
-                examples: [
-                  {
-                    chunk_id: 'chunk-12',
-                    span: 'p.3 paragraph 2',
-                    reference: 'Docling#table-5',
-                  },
-                ],
-              }, null, 2);
-            },
-          },
-        ];
+      const stepMap = {
+        docling_parse: 'docling',
+        chunk_assembly: 'chunking',
+        embedding_indexing: 'embeddings',
+        citation_enrichment: 'citations',
+      };
 
-        let delay = 0;
-        steps.forEach((step, index) => {
-          setStepStatus(step.id, 'running');
-          delay += step.duration;
-          pipelineTimer = window.setTimeout(() => {
-            setStepStatus(step.id, 'done');
-            step.onComplete?.();
-            if (index === steps.length - 1) {
-              appendJobRow({
-                id: `job-${Date.now()}`,
-                source: queue.map((file) => file.name).join(', '),
-                collection: config.collection,
-                status: 'completed',
-                updated_at: 'just now',
-              });
-            }
-          }, delay);
+      function pipelineStatus(status) {
+        switch (status) {
+          case 'running':
+            return 'running';
+          case 'success':
+            return 'done';
+          case 'failed':
+            return 'error';
+          default:
+            return 'pending';
+        }
+      }
+
+      function describeEvent(event) {
+        if (!event?.detail) return undefined;
+        if (event.step === 'docling_parse' && event.detail.documents !== undefined) {
+          return `Parsed ${event.detail.documents} document(s)`;
+        }
+        if (event.step === 'chunk_assembly' && event.detail.chunks !== undefined) {
+          return `Chunks: ${event.detail.chunks}`;
+        }
+        if (event.step === 'embedding_indexing' && event.detail.chunks_embedded !== undefined) {
+          return `Embedded ${event.detail.chunks_embedded} chunk(s)`;
+        }
+        if (event.step === 'citation_enrichment' && Array.isArray(event.detail.citations)) {
+          return `Citations linked: ${event.detail.citations.length}`;
+        }
+        return undefined;
+      }
+
+      function updatePreviews(events, config) {
+        events.forEach((event) => {
+          if (!event.detail) return;
+          if (event.step === 'docling_parse') {
+            previewDocling.textContent = JSON.stringify(event.detail, null, 2);
+          }
+          if (event.step === 'chunk_assembly') {
+            const detail = { chunk_size: config.chunk_size, chunk_overlap: config.chunk_overlap, ...event.detail };
+            previewChunks.textContent = JSON.stringify(detail, null, 2);
+          }
+          if (event.step === 'embedding_indexing') {
+            const current = previewChunks.textContent ? JSON.parse(previewChunks.textContent) : {};
+            previewChunks.textContent = JSON.stringify({ ...current, ...event.detail }, null, 2);
+          }
+          if (event.step === 'citation_enrichment') {
+            previewCitations.textContent = JSON.stringify(event.detail, null, 2);
+          }
         });
       }
 
+      function applyJobState(job, config) {
+        if (!job?.events) return;
+        updatePreviews(job.events, config);
+        job.events.forEach((event) => {
+          const stepKey = stepMap[event.step];
+          if (!stepKey) return;
+          setStepStatus(stepKey, pipelineStatus(event.status), describeEvent(event));
+        });
+        if (job.status === 'failed') {
+          setStepStatus('citations', 'error', job.error_message || 'Ingestion failed');
+        }
+      }
+
       function appendJobRow(job) {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td>${job.id}</td>
-          <td>${job.source}</td>
-          <td>${job.collection}</td>
-          <td><span class="status-pill status-pill--${job.status}">${job.status}</span></td>
-          <td>${job.updated_at}</td>
-        `;
-        jobTableBody.prepend(row);
+        let row = jobTableBody.querySelector(`tr[data-job-id="${job.id}"]`);
+        if (!row) {
+          row = document.createElement('tr');
+          row.dataset.jobId = job.id;
+          row.innerHTML = `
+            <td class="job-id"></td>
+            <td class="job-source"></td>
+            <td class="job-collection"></td>
+            <td class="job-status"></td>
+            <td class="job-updated"></td>
+          `;
+          jobTableBody.prepend(row);
+        }
+        row.querySelector('.job-id').textContent = job.id;
+        row.querySelector('.job-source').textContent = job.source;
+        row.querySelector('.job-collection').textContent = job.collection;
+        row.querySelector('.job-status').innerHTML = `<span class="status-pill status-pill--${job.status}">${job.status}</span>`;
+        row.querySelector('.job-updated').textContent = job.updated_at;
+      }
+
+      async function submitJobs(config) {
+        const body = new FormData();
+        queue.forEach((file) => body.append('files', file));
+        body.append('collection', config.collection);
+        body.append('chunk_size', String(config.chunk_size));
+        body.append('chunk_overlap', String(config.chunk_overlap));
+        body.append(
+          'metadata',
+          JSON.stringify({ include_tables: config.include_tables, generate_citations: config.generate_citations })
+        );
+        const response = await fetch('/ingestion/jobs/upload', { method: 'POST', body });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || 'Ingestion request failed');
+        }
+        return response.json();
+      }
+
+      async function pollJob(jobId, config) {
+        let complete = false;
+        while (!complete) {
+          const response = await fetch(`/ingestion/jobs/${jobId}`, { headers: { Accept: 'application/json' } });
+          if (!response.ok) {
+            throw new Error('Failed to fetch job status');
+          }
+          const job = await response.json();
+          applyJobState(job, config);
+          appendJobRow({
+            id: job.id,
+            source: job.source,
+            collection: job.collection_name,
+            status: job.status,
+            updated_at: new Date(job.updated_at).toLocaleString(),
+          });
+          complete = job.status === 'success' || job.status === 'failed';
+          if (!complete) {
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+        }
       }
 
       runWorkflow.addEventListener('click', async () => {
@@ -414,36 +498,56 @@
         };
 
         resetPipeline();
-        simulateWorkflow(config);
+        previewChunks.textContent = JSON.stringify({ chunk_size: config.chunk_size, chunk_overlap: config.chunk_overlap }, null, 2);
 
-        /*
-        // TODO: integrate with backend ingestion endpoints
-        const payload = {
-          source: uploadedLocation,
-          collection_name: config.collection,
-        };
-        const response = await fetch('/ingestion/jobs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        */
+        try {
+          runWorkflow.disabled = true;
+          const jobs = await submitJobs(config);
+          queue = [];
+          updateQueueView();
+          await Promise.all(jobs.map((job) => pollJob(job.id, config)));
+        } catch (error) {
+          console.error(error);
+          setStepStatus('docling', 'error', 'Upload failed');
+        } finally {
+          runWorkflow.disabled = false;
+        }
       });
 
       document.getElementById('refresh-jobs')?.addEventListener('click', async () => {
         try {
-          const response = await fetch('/ingestion/collections', { headers: { Accept: 'application/json' } });
-          if (!response.ok) {
+          const [collectionsResponse, jobsResponse] = await Promise.all([
+            fetch('/ingestion/collections', { headers: { Accept: 'application/json' } }),
+            fetch('/ingestion/jobs', { headers: { Accept: 'application/json' } }),
+          ]);
+          if (!collectionsResponse.ok) {
             throw new Error('Failed to refresh collections');
           }
-          const collections = await response.json();
+          if (!jobsResponse.ok) {
+            throw new Error('Failed to fetch jobs');
+          }
+          const collectionsData = await collectionsResponse.json();
           const select = document.getElementById('collection-select');
           select.innerHTML = '';
-          collections.forEach((item) => {
+          collectionsData.forEach((item) => {
             const option = document.createElement('option');
             option.value = item.name;
+            option.dataset.defaultSize = item.default_chunk_size;
+            option.dataset.defaultOverlap = item.default_chunk_overlap;
             option.textContent = `${item.name} • ${item.document_count} docs`;
             select.appendChild(option);
+          });
+
+          const jobsData = await jobsResponse.json();
+          jobTableBody.innerHTML = '';
+          jobsData.forEach((job) => {
+            appendJobRow({
+              id: job.id,
+              source: job.source,
+              collection: job.collection_name,
+              status: job.status,
+              updated_at: new Date(job.updated_at).toLocaleString(),
+            });
           });
         } catch (error) {
           console.error(error);
