@@ -93,3 +93,5 @@ venv.bak/
 
 ### custom section ###
 /requirements/*.txt
+/storage/*
+/logs/*

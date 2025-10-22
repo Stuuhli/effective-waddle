@@ -45,24 +45,14 @@ class PostgresSettings(BaseModel):
         return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
 
 
-class MilvusSettings(BaseModel):
-    """Milvus vector store configuration."""
-
-    host: str = "localhost"
-    port: int = 19530
-    username: str | None = None
-    password: str | None = None
-    secure: bool = False
-    collection: str = "documents"
-
-
 class LLMSettings(BaseModel):
     """LLM provider configuration for Ollama and vLLM."""
 
     provider: Literal["ollama", "vllm"] = "ollama"
     ollama_host: str = "http://localhost:11434"
+    ollama_binary: str = "/usr/local/bin/ollama"
     ollama_model: str = "qwen3:4b"
-    embedding_model: str = "qwen3:0.6b"
+    embedding_model: str = "qwen3-embedding:0.6b"
     vllm_host: str = "http://localhost:8000"
     vllm_model: str = "qwen3:12b"
     request_timeout: int = 60
@@ -103,17 +93,31 @@ class StorageSettings(BaseModel):
     docling_hash_index: Path = Path("storage/docling/index.json")
 
 
+class DoclingSettings(BaseModel):
+    """Configuration for Docling PDF parsing behaviour."""
+
+    enabled: bool = True
+    do_ocr: bool = False
+    do_table_structure: bool = True
+    table_mode: Literal["accurate", "fast"] = "accurate"
+    table_cell_matching: bool = True
+    generate_page_images: bool = True
+    image_scale: float = 2.0
+    accelerator_device: Literal["cpu", "cuda"] = "cpu"
+    accelerator_num_threads: int = 0
+
+
 class Settings(BaseSettings):
     """Aggregate settings for the application."""
 
     fastapi: FastAPISettings = Field(default_factory=FastAPISettings)
     postgres: PostgresSettings = Field(default_factory=PostgresSettings)
-    milvus: MilvusSettings = Field(default_factory=MilvusSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     graphrag: GraphRAGSettings = Field(default_factory=GraphRAGSettings)
     bootstrap: BootstrapSettings = Field(default_factory=BootstrapSettings)
     chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    docling: DoclingSettings = Field(default_factory=DoclingSettings)
 
     model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", case_sensitive=False)
 
@@ -134,11 +138,11 @@ __all__ = [
     "Settings",
     "FastAPISettings",
     "PostgresSettings",
-    "MilvusSettings",
     "LLMSettings",
     "GraphRAGSettings",
     "BootstrapSettings",
     "ChunkingSettings",
     "StorageSettings",
+    "DoclingSettings",
     "load_settings",
 ]

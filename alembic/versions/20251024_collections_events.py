@@ -8,8 +8,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = "20251024_add_collections_and_events"
-down_revision: Union[str, None] = "20251023_add_ingestion_job_chunk_config"
+revision: str = "20251024_collections_events"
+down_revision: Union[str, None] = "20251023_ingest_chunk_cfg"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

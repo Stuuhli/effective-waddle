@@ -7,7 +7,7 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = "20251023_add_ingestion_job_chunk_config"
+revision: str = "20251023_ingest_chunk_cfg"
 down_revision: Union[str, None] = "20251022_add_chunk_embeddings"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

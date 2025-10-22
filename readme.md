@@ -3,17 +3,16 @@
 ## Overview
 The `KiRa` service bundles authentication, retrieval-augmented chat, document ingestion, and
 an administrative surface into a single FastAPI application.  Async SQLAlchemy models back the API, and
-vector retrieval can be delegated either to a standard Milvus-powered RAG flow or to the GraphRAG
+vector retrieval is handled through PostgreSQL with `pgvector`, alongside the optional GraphRAG
 adapter that was ported from the legacy project.
 
 ## How can it be run?
-Currently, the development is done in a WSL due to milvus only running on a linux system. Within VSCode, open a remote session in WSL Ubuntu, then simply clone the working repo and start working.
+Development is done in a WSL on Windows. Simply connect to a WSL:Ubuntu instance within VSCode and open the repo.
 
 ## Prerequisites
 - Python 3.11+
 - Docker for quick local development. Install it on the host system (Windows) and make sure Settings → Resources → WSL Integration is enabled
-- Milvus for vector storage
-- Ollama or vLLM backend for LLM completions (installed to /usr/local)
+- Ollama or vLLM backend for LLM completions (installed to /usr/local/bin/ollama => /usr/local/bin/ollama pull ***)
 - Apptainer/Singularity if you plan to build the runtime container
 - PostgreSQL 13+ reachable from the application
 - (Optional) DBeaver for looking at the user DB
@@ -22,7 +21,6 @@ Currently, the development is done in a WSL due to milvus only running on a linu
 sudo apt update
 sudo apt install postgresql postgresql-contrib
 sudo apt install apptainer
-pip install milvus
 curl -fsSL https://ollama.com/install.sh | sh
 ```
 
@@ -59,7 +57,7 @@ Copy the template and adjust credentials as needed:
 cp .env.example .env
 ```
 
-Key settings such as FastAPI secrets, PostgreSQL credentials, Milvus host, and GraphRAG defaults are
+Key settings such as FastAPI secrets, PostgreSQL credentials and GraphRAG defaults are
 documented in the template.  See [`.env.example`](.env.example) for the authoritative reference.
 
 For generating a FastAPI Key, you can paste the following script into a python terminal
@@ -80,7 +78,7 @@ docker run \
   -e POSTGRES_USER=rag_user \
   -e POSTGRES_PASSWORD=rag_password \
   -p 5433:5432 \
-  -d postgres:15
+  -d ankane/pgvector:latest
 ```
 
 Populate the matching values in `.env` (host, port, user, password, database).  The application will
@@ -91,6 +89,19 @@ After the initial container setup, you can simply start and stop it again using
 ```
 docker start rag-postgres
 docker stop rag-postgres
+```
+
+To reset the DB, simply use these commands
+```bash
+docker stop rag-postgres
+docker rm rag-postgres
+docker run \
+  --name rag-postgres \
+  -e POSTGRES_DB=rag_platform \
+  -e POSTGRES_USER=rag_user \
+  -e POSTGRES_PASSWORD=rag_password \
+  -p 5433:5432 \
+  -d ankane/pgvector:latest
 ```
 <br> <br>
 
@@ -106,7 +117,7 @@ Apply the latest schema using Alembic:
 alembic upgrade head
 ```
 
-The Alembic environment reads the same settings module as the API, so make sure your `.env` file is in place before running migrations.
+The Alembic environment reads the same settings module as the API, so make sure the `.env` file is in place before running migrations.
 <br>
 When doing changes to the schema (which you should avoid doing), the above command has to be run again to account for these changes. Using DBeaver to inspect the changes is recommended.
 
@@ -143,12 +154,12 @@ python -m src.worker_main
 The ingestion pipeline parses single files or entire directories (multi-document ingestion) with
 [Docling](https://github.com/docling-ai/docling) when available, chunks page content, enriches it with
 metadata (page number, chunk index, source path, collection name, original Docling metadata, …), embeds
-each chunk via the configured Ollama model (`qwen3:0.6b` or `embeddinggemma`), and stores the resulting
+each chunk via the configured Ollama model (`qwen3-embedding:0.6b` or `embeddinggemma`), and stores the resulting
 vectors in PostgreSQL using `pgvector`.
 
 1. **Configure embeddings** – ensure Ollama is running and expose it via environment variables (see
    `.env.example`). The defaults target a local daemon at `http://localhost:11434` and select
-   `qwen3:0.6b`. Override with:
+   `qwen3-embedding:0.6b`. Override with:
 
    ```bash
    export LLM__PROVIDER=ollama
@@ -208,8 +219,6 @@ running the automated checks.
 
 
 ## Optional services
-- **Milvus**: Update `MILVUS__HOST`, `MILVUS__PORT`, and related settings to point to your vector
-  database.  Until Milvus is available, the RAG strategy will operate in a placeholder mode.
 - **GraphRAG workspace**: Ensure the paths defined in `.env` (e.g., `GRAPHRAG__ROOT_DIR`) point to the
   expected GraphRAG configuration directory.
 - **LLM backends**: Configure `LLM__PROVIDER` (`ollama` or `vllm`) and the corresponding host/model

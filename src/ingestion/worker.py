@@ -5,6 +5,7 @@ import asyncio
 import logging
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import Settings
@@ -21,6 +22,7 @@ LOGGER = logging.getLogger(__name__)
 async def _acquire_job(session: AsyncSession) -> IngestionJob | None:
     stmt = (
         select(IngestionJob)
+        .options(selectinload(IngestionJob.collection))
         .where(IngestionJob.status == IngestionStatus.pending)
         .with_for_update(skip_locked=True)
         .limit(1)
@@ -36,7 +38,10 @@ async def process_job(session: AsyncSession, job: IngestionJob, settings: Settin
     try:
         LOGGER.info("Processing ingestion job %s from %s", job.id, job.source)
         await session.refresh(job, attribute_names=["collection", "events"])
-        parser = DoclingParser(storage_settings=settings.storage)
+        parser = DoclingParser(
+            storage_settings=settings.storage,
+            docling_settings=settings.docling,
+        )
         embedder = create_embedding_client(settings)
         pipeline = DocumentIngestionPipeline(
             repo,

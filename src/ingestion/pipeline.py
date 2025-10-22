@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import logging
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -13,7 +14,7 @@ from .exceptions import IngestionError
 from ..infrastructure.database import IngestionEvent, IngestionJob
 from ..infrastructure.embeddings.base import EmbeddingClient
 from ..infrastructure.repositories.document_repo import DocumentRepository
-from ..config import StorageSettings, load_settings
+from ..config import DoclingSettings, StorageSettings, load_settings
 from ..infrastructure.database import IngestionEventStatus, IngestionStep
 
 LOGGER = logging.getLogger(__name__)
@@ -117,32 +118,64 @@ def _extract_page_text(page: Any) -> str:
 class DoclingParser:
     """Parse documents using Docling when available."""
 
-    def __init__(self, storage_settings: StorageSettings | None = None) -> None:
-        try:
-            from docling.document_converter import DocumentConverter
-        except Exception:  # pragma: no cover - optional dependency resolution
-            LOGGER.warning("Docling not available, falling back to plain text parsing")
+    def __init__(
+        self,
+        storage_settings: StorageSettings | None = None,
+        docling_settings: DoclingSettings | None = None,
+    ) -> None:
+        settings = load_settings()
+        self._storage = storage_settings or settings.storage
+        self._docling_settings = docling_settings or settings.docling
+
+        if not self._docling_settings.enabled:
+            LOGGER.warning("Docling parsing disabled via configuration, falling back to plain text parsing")
             self._converter = None
-            self._document_input = None
         else:
-            try:  # pragma: no cover - import resolution depends on docling version
-                from docling.models.input import DocumentInput  # type: ignore[attr-defined]
+            try:
+                from docling.datamodel.base_models import InputFormat
+                from docling.datamodel.pipeline_options import (
+                    AcceleratorDevice,
+                    AcceleratorOptions,
+                    PdfPipelineOptions,
+                    TableFormerMode,
+                )
+                from docling.document_converter import DocumentConverter, PdfFormatOption
             except Exception:  # pragma: no cover - optional dependency resolution
-                try:
-                    from docling.models import DocumentInput  # type: ignore[attr-defined]
-                except Exception:
-                    LOGGER.warning("Docling DocumentInput model missing, using plaintext fallback")
-                    self._converter = None
-                    self._document_input = None
-                else:
-                    from docling.pipeline.standard import StandardPipeline  # type: ignore[attr-defined]
-                    self._converter = DocumentConverter(pipeline=StandardPipeline())
-                    self._document_input = DocumentInput
+                LOGGER.warning("Docling not available, falling back to plain text parsing")
+                self._converter = None
             else:
-                from docling.pipeline.standard import StandardPipeline  # type: ignore[attr-defined]
-                self._converter = DocumentConverter(pipeline=StandardPipeline())
-                self._document_input = DocumentInput
-        self._storage = storage_settings or load_settings().storage
+                pdf_options = PdfPipelineOptions()
+                pdf_options.do_ocr = self._docling_settings.do_ocr
+                pdf_options.do_table_structure = self._docling_settings.do_table_structure
+                if self._docling_settings.do_table_structure:
+                    try:
+                        table_mode = TableFormerMode[self._docling_settings.table_mode.upper()]
+                    except KeyError:
+                        LOGGER.warning(
+                            "Unknown Docling table mode '%s', defaulting to ACCURATE.",
+                            self._docling_settings.table_mode,
+                        )
+                        table_mode = TableFormerMode.ACCURATE
+                    pdf_options.table_structure_options.mode = table_mode
+                    pdf_options.table_structure_options.do_cell_matching = self._docling_settings.table_cell_matching
+                pdf_options.generate_page_images = self._docling_settings.generate_page_images
+                pdf_options.images_scale = self._docling_settings.image_scale
+
+                device = (
+                    AcceleratorDevice.CUDA
+                    if self._docling_settings.accelerator_device.lower() == "cuda"
+                    else AcceleratorDevice.CPU
+                )
+                accel_kwargs: dict[str, object] = {"device": device}
+                if self._docling_settings.accelerator_num_threads > 0:
+                    accel_kwargs["num_threads"] = self._docling_settings.accelerator_num_threads
+                pdf_options.accelerator_options = AcceleratorOptions(**accel_kwargs)
+
+                format_options = {
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),
+                }
+                self._converter = DocumentConverter(format_options=format_options)
+
         self._docling_dir = Path(self._storage.docling_output_dir)
         self._hash_index_path = Path(self._storage.docling_hash_index)
         self._hash_index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,6 +212,50 @@ class DoclingParser:
         except base64.binascii.Error:  # pragma: no cover - defensive
             return None
 
+    @staticmethod
+    def _serialize_markdown(document: Any) -> str | None:
+        try:
+            from docling_core.transforms.serializer.markdown import MarkdownDocSerializer  # type: ignore[attr-defined]
+        except Exception:  # pragma: no cover - optional dependency resolution
+            return None
+        try:
+            serializer = MarkdownDocSerializer(doc=document)
+            serialized = serializer.serialize()
+        except Exception:  # pragma: no cover - serialization defensive
+            LOGGER.debug("Docling markdown serialization failed", exc_info=True)
+            return None
+        if isinstance(serialized, str):
+            return serialized
+        return getattr(serialized, "markdown", None) or getattr(serialized, "content", None)
+
+    @staticmethod
+    def _extract_section_summaries(document: Any) -> list[dict[str, object]]:
+        try:
+            from docling_core.types.doc.document import SectionHeaderItem  # type: ignore[attr-defined]
+        except Exception:  # pragma: no cover - optional dependency resolution
+            return []
+        sections: list[dict[str, object]] = []
+        spans = getattr(document, "spans", []) or []
+        for span in spans:
+            item = getattr(span, "item", None)
+            if not isinstance(item, SectionHeaderItem):
+                continue
+            heading = getattr(item, "orig", None) or getattr(item, "title", None)
+            if not isinstance(heading, str):
+                continue
+            page_numbers: list[int] = []
+            for prov in getattr(item, "prov", []) or []:
+                page_no = getattr(prov, "page_no", None)
+                if isinstance(page_no, int):
+                    page_numbers.append(page_no)
+            sections.append(
+                {
+                    "heading": heading.strip(),
+                    "pages": sorted(set(page_numbers)),
+                }
+            )
+        return sections
+
     async def parse(self, path: Path) -> list[ParsedDocument]:
         if self._converter is None:
             LOGGER.debug("Reading %s as plaintext", path)
@@ -193,12 +270,51 @@ class DoclingParser:
             return [ParsedDocument(title=path.stem, pages=[page], metadata=metadata)]
 
         def _convert() -> list[ParsedDocument]:
-            result = self._converter.convert(self._document_input(file_path=str(path)))
-            document = result.document
             file_hash = self._create_file_hash(path)
             cache_dir = self._docling_dir / file_hash
             cache_dir.mkdir(parents=True, exist_ok=True)
             json_path = cache_dir / f"{file_hash}.json"
+            metadata_path = cache_dir / "conversion-metadata.json"
+
+            metadata_dump: dict[str, Any] = {}
+            document: Any | None = None
+
+            cache_hit = json_path.exists()
+            if cache_hit:
+                try:
+                    from docling_core.types.doc.document import DoclingDocument  # type: ignore[attr-defined]
+
+                    document = DoclingDocument.load_from_json(json_path)
+                    if metadata_path.exists():
+                        metadata_dump = json.loads(metadata_path.read_text(encoding="utf-8"))
+                except Exception as exc:  # pragma: no cover - corrupted cache
+                    LOGGER.warning("Failed to load cached Docling artefacts for %s: %s. Re-parsing.", path, exc)
+                    document = None
+                    metadata_dump = {}
+                    cache_hit = False
+
+            if document is None:
+                result = self._converter.convert(str(path))
+                document = result.document
+                try:
+                    document.save_as_json(json_path)  # type: ignore[attr-defined]
+                except Exception:  # pragma: no cover - best effort persistence
+                    LOGGER.debug("Unable to persist Docling JSON for %s", path, exc_info=True)
+                try:
+                    metadata_dump = result.model_dump()
+                    metadata_path.write_text(
+                        json.dumps(metadata_dump, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception:  # pragma: no cover - serialization guard
+                    LOGGER.debug("Skipping Docling metadata persistence for %s", path, exc_info=True)
+                    metadata_dump = {}
+
+            hash_index = self._load_hash_index()
+            if hash_index.get(str(path)) != file_hash:
+                hash_index[str(path)] = file_hash
+                self._save_hash_index(hash_index)
+
             title = None
             metadata_obj = getattr(document, "metadata", None)
             if metadata_obj is not None:
@@ -214,26 +330,23 @@ class DoclingParser:
                 "docling_hash": file_hash,
                 "docling_output": str(json_path),
                 "image_dir": str(cache_dir),
+                "docling_cache_hit": cache_hit,
             }
-            document_metadata.update(_extract_metadata(getattr(result, "metadata", None)))
+            document_metadata.update(_extract_metadata(metadata_dump.get("metadata")))
+            document_metadata.update(_extract_metadata(metadata_dump.get("document")))
             document_metadata.update(_extract_metadata(metadata_obj))
+            markdown_text = self._serialize_markdown(document)
+            if markdown_text:
+                document_metadata["markdown"] = markdown_text
+            section_summaries = self._extract_section_summaries(document)
+            if section_summaries:
+                document_metadata["sections"] = section_summaries
             document_metadata = _sanitize_metadata(document_metadata)
 
             pages: list[ParsedPage] = []
-            raw_pages = []
-            if hasattr(result, "pages"):
-                raw_pages = getattr(result, "pages") or []
-            elif hasattr(document, "pages"):
-                raw_pages = getattr(document, "pages") or []
-
-            try:
-                document.save_as_json(str(json_path))  # type: ignore[call-arg]
-            except Exception:  # pragma: no cover - best effort persistence
-                LOGGER.debug("Unable to persist Docling JSON for %s", path, exc_info=True)
-
-            hash_index = self._load_hash_index()
-            hash_index[file_hash] = str(cache_dir)
-            self._save_hash_index(hash_index)
+            raw_pages = getattr(document, "pages", None) or []
+            if isinstance(raw_pages, dict):
+                raw_pages = list(raw_pages.values())
 
             for index, page in enumerate(raw_pages, start=1):
                 page_text = _extract_page_text(page)

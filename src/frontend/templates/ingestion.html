@@ -326,6 +326,26 @@
         }
       });
 
+      function getCookie(name) {
+        return document.cookie
+          .split('; ')
+          .find((row) => row.startsWith(`${name}=`))
+          ?.split('=')[1];
+      }
+
+      function withAuth(options = {}) {
+        const token = getCookie('rag_token');
+        const headers = new Headers(options.headers || {});
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`);
+        }
+        return {
+          ...options,
+          headers,
+          credentials: 'include',
+        };
+      }
+
       function setStepStatus(step, status, detail) {
         const element = pipelineElement.querySelector(`[data-step="${step}"]`);
         if (!element) return;
@@ -455,7 +475,7 @@
           'metadata',
           JSON.stringify({ include_tables: config.include_tables, generate_citations: config.generate_citations })
         );
-        const response = await fetch('/ingestion/jobs/upload', { method: 'POST', body });
+        const response = await fetch('/ingestion/jobs/upload', withAuth({ method: 'POST', body }));
         if (!response.ok) {
           const text = await response.text();
           throw new Error(text || 'Ingestion request failed');
@@ -466,7 +486,10 @@
       async function pollJob(jobId, config) {
         let complete = false;
         while (!complete) {
-          const response = await fetch(`/ingestion/jobs/${jobId}`, { headers: { Accept: 'application/json' } });
+          const response = await fetch(
+            `/ingestion/jobs/${jobId}`,
+            withAuth({ headers: { Accept: 'application/json' } })
+          );
           if (!response.ok) {
             throw new Error('Failed to fetch job status');
           }
@@ -517,8 +540,8 @@
       document.getElementById('refresh-jobs')?.addEventListener('click', async () => {
         try {
           const [collectionsResponse, jobsResponse] = await Promise.all([
-            fetch('/ingestion/collections', { headers: { Accept: 'application/json' } }),
-            fetch('/ingestion/jobs', { headers: { Accept: 'application/json' } }),
+            fetch('/ingestion/collections', withAuth({ headers: { Accept: 'application/json' } })),
+            fetch('/ingestion/jobs', withAuth({ headers: { Accept: 'application/json' } })),
           ]);
           if (!collectionsResponse.ok) {
             throw new Error('Failed to refresh collections');

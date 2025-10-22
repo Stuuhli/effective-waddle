@@ -4,9 +4,14 @@ from __future__ import annotations
 import json
 import logging
 from logging.config import dictConfig
+from pathlib import Path
 from typing import Any, Dict
 
 from .config import Settings, load_settings
+
+LOG_DIR = Path("logs")
+APP_LOG_PATH = LOG_DIR / "application.log"
+INGESTION_LOG_PATH = LOG_DIR / "ingestion.log"
 
 
 class _JsonFormatter(logging.Formatter):
@@ -48,16 +53,47 @@ def build_logging_config(settings: Settings | None = None) -> Dict[str, Any]:
                 "formatter": "json",
                 "level": "INFO",
             },
+            "app_file": {
+                "class": "logging.FileHandler",
+                "formatter": "json",
+                "level": "INFO",
+                "filename": str(APP_LOG_PATH),
+                "encoding": "utf-8",
+                "mode": "a",
+            },
+            "ingestion_file": {
+                "class": "logging.FileHandler",
+                "formatter": "json",
+                "level": "DEBUG",
+                "filename": str(INGESTION_LOG_PATH),
+                "encoding": "utf-8",
+                "mode": "a",
+            },
             "uvicorn": {
                 "class": "logging.StreamHandler",
                 "formatter": "console",
             },
         },
         "loggers": {
-            "": {"handlers": ["default"], "level": "INFO"},
+            "": {"handlers": ["default", "app_file"], "level": "INFO"},
             "uvicorn": {"handlers": ["uvicorn"], "level": "INFO", "propagate": False},
             "uvicorn.error": {"handlers": ["default"], "level": "INFO", "propagate": False},
             "uvicorn.access": {"handlers": ["default"], "level": "INFO", "propagate": False},
+            "src.ingestion": {
+                "handlers": ["default", "ingestion_file", "app_file"],
+                "level": "DEBUG",
+                "propagate": False,
+            },
+            "src.ingestion.pipeline": {
+                "handlers": ["default", "ingestion_file", "app_file"],
+                "level": "DEBUG",
+                "propagate": False,
+            },
+            "docling": {
+                "handlers": ["default", "ingestion_file", "app_file"],
+                "level": "DEBUG",
+                "propagate": False,
+            },
         },
     }
 
@@ -65,6 +101,7 @@ def build_logging_config(settings: Settings | None = None) -> Dict[str, Any]:
 def setup_logging(settings: Settings | None = None) -> None:
     """Configure logging for the application."""
 
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     dictConfig(build_logging_config(settings))
 
 
