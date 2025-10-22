@@ -135,7 +135,65 @@ need document processing:
 python -m src.worker_main
 ```
 
-## 6. Run the test suite
+## 6. Use the ingestion pipeline
+The ingestion pipeline parses single files or entire directories (multi-document ingestion) with
+[Docling](https://github.com/docling-ai/docling) when available, chunks page content, enriches it with
+metadata (page number, chunk index, source path, collection name, original Docling metadata, …), embeds
+each chunk via the configured Ollama model (`qwen3:0.6b` or `embeddinggemma`), and stores the resulting
+vectors in PostgreSQL using `pgvector`.
+
+1. **Configure embeddings** – ensure Ollama is running and expose it via environment variables (see
+   `.env.example`). The defaults target a local daemon at `http://localhost:11434` and select
+   `qwen3:0.6b`. Override with:
+
+   ```bash
+   export LLM__PROVIDER=ollama
+   export LLM__OLLAMA_HOST=http://localhost:11434
+   export LLM__EMBEDDING_MODEL=embeddinggemma  # optional alternative
+   ```
+
+   If Ollama is unavailable, the service falls back to the deterministic local embedder.
+
+2. **Prepare your sources** – place `.pdf`, `.md`, `.txt`, or `.json` files in a directory that is
+   reachable from both the API and the worker. Nested directories are traversed recursively.
+
+3. **Create an ingestion job** – authenticate against the API and submit a job specifying the source
+   path and collection name:
+
+   ```bash
+   curl -X POST "http://localhost:8000/ingestion/jobs" \
+     -H "Authorization: Bearer <JWT>" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "source": "/abs/path/to/documents",
+       "collection_name": "product-manuals"
+     }'
+   ```
+
+   The job status starts as `pending`. Each file is parsed (via Docling when possible) and chunked.
+
+4. **Monitor progress** – query the job status at any time:
+
+   ```bash
+   curl -H "Authorization: Bearer <JWT>" \
+     "http://localhost:8000/ingestion/jobs/<job_id>"
+   ```
+
+   A `success` status indicates that all chunks have been written with metadata such as
+   `page_number`, `page_chunk_index`, `chunk_index`, `word_start`, `word_end`, and optional Docling
+   metadata copied into the `metadata_json` column.
+
+5. **Query collections** – list known collections to drive retrieval prompts or UI dropdowns:
+
+   ```bash
+   curl -H "Authorization: Bearer <JWT>" "http://localhost:8000/ingestion/collections"
+   ```
+
+Each ingestion job records the originating user, associates generated documents and chunks with that
+job, and commits the embeddings to PostgreSQL. Retrieval flows automatically surface the stored
+metadata in the context they return.
+
+## 7. Run the test suite
 ```bash
 pytest tests -q
 ```
@@ -143,7 +201,7 @@ pytest tests -q
 The test harness provisions an async SQLite database in-memory, so PostgreSQL is not required when
 running the automated checks.
 
-## 7. Build & run with Apptainer
+## 8. Build & run with Apptainer
 The project is designed to run inside Apptainer containers on Slurm-managed HPC systems. A minimal
 workflow looks like this:
 

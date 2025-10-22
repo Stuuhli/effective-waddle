@@ -2,6 +2,6 @@
 
 from .base import VectorStoreClient
 from .graphrag_engine import GraphRAGQueryEngine
-from .milvus import MilvusVectorStore
+from .pgvector import PGVectorStore
 
-__all__ = ["VectorStoreClient", "GraphRAGQueryEngine", "MilvusVectorStore"]
+__all__ = ["VectorStoreClient", "GraphRAGQueryEngine", "PGVectorStore"]

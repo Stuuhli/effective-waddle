@@ -21,7 +21,10 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from pgvector.sqlalchemy import Vector
+
 from ..config import Settings
+from .embeddings.base import EMBEDDING_DIMENSION
 
 
 NAMING_CONVENTION = {
@@ -152,6 +155,8 @@ class Chunk(TimestampMixin, Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     vector_id: Mapped[Optional[str]] = mapped_column(String(255))
     embedding_model: Mapped[Optional[str]] = mapped_column(String(128))
+    metadata_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(EMBEDDING_DIMENSION))
 
     document: Mapped[Document] = relationship(back_populates="chunks")
 

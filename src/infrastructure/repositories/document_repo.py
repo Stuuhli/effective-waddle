@@ -1,6 +1,7 @@
 """Document repository implementation."""
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Optional
 
 from sqlalchemy import select
@@ -39,9 +40,23 @@ class DocumentRepository(AsyncRepository[Document]):
         return document
 
     async def add_chunk(
-        self, *, document_id: str, content: str, vector_id: str | None = None, embedding_model: str | None = None
+        self,
+        *,
+        document_id: str,
+        content: str,
+        vector_id: str | None = None,
+        embedding_model: str | None = None,
+        embedding: Sequence[float] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> Chunk:
-        chunk = Chunk(document_id=document_id, content=content, vector_id=vector_id, embedding_model=embedding_model)
+        chunk = Chunk(
+            document_id=document_id,
+            content=content,
+            vector_id=vector_id,
+            embedding_model=embedding_model,
+            embedding=list(embedding) if embedding is not None else None,
+            metadata_json=metadata,
+        )
         self.session.add(chunk)
         await self.session.flush()
         await self.session.refresh(chunk)
