@@ -26,6 +26,7 @@ from src.auth.constants import (
 from src.config import load_settings
 from src.infrastructure.database import Base, configure_engine, get_engine
 from src.infrastructure.repositories.user_repo import UserRepository
+from src.infrastructure.repositories.document_repo import DocumentRepository
 
 ROLE_DESCRIPTIONS: Dict[str, str] = {
     DEFAULT_ROLE_NAME: DEFAULT_ROLE_DESCRIPTION,
@@ -54,10 +55,11 @@ async def seed_admin() -> None:
     session_factory = configure_engine(settings)
 
     async with session_factory() as session:  # type: ignore[call-arg]
-        repo = UserRepository(session)
+        user_repo = UserRepository(session)
+        document_repo = DocumentRepository(session)
 
         roles = {
-            name: await repo.ensure_role(name, description)
+            name: await user_repo.ensure_role(name, description)
             for name, description in ROLE_DESCRIPTIONS.items()
         }
 
@@ -68,8 +70,13 @@ async def seed_admin() -> None:
             )
 
         password_helper = PasswordHelper()
+        compliance_collection = await document_repo.ensure_collection(
+            "compliance", "Compliance document collection"
+        )
+        await document_repo.assign_collection_to_role(compliance_collection, roles[ADMIN_ROLE_NAME])
+
         password_hash = password_helper.hash(settings.bootstrap.admin_password)
-        await repo.create_user(
+        await user_repo.create_user(
             email=settings.bootstrap.admin_email,
             hashed_password=password_hash,
             full_name=settings.bootstrap.admin_full_name,
@@ -78,6 +85,8 @@ async def seed_admin() -> None:
             is_superuser=True,
             is_verified=True,
         )
+
+        await session.commit()
 
         print(
             f"Seeded admin user '{settings.bootstrap.admin_email}' "

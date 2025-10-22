@@ -88,6 +88,21 @@ class BootstrapSettings(BaseModel):
     admin_capability: Literal["rag", "graphrag"] = "rag"
 
 
+class ChunkingSettings(BaseModel):
+    """Defaults for document chunking."""
+
+    default_size: int = 750
+    default_overlap: int = 150
+
+
+class StorageSettings(BaseModel):
+    """File-system storage configuration for ingestion artefacts."""
+
+    upload_dir: Path = Path("storage/uploads")
+    docling_output_dir: Path = Path("storage/docling")
+    docling_hash_index: Path = Path("storage/docling/index.json")
+
+
 class Settings(BaseSettings):
     """Aggregate settings for the application."""
 
@@ -97,6 +112,8 @@ class Settings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     graphrag: GraphRAGSettings = Field(default_factory=GraphRAGSettings)
     bootstrap: BootstrapSettings = Field(default_factory=BootstrapSettings)
+    chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
+    storage: StorageSettings = Field(default_factory=StorageSettings)
 
     model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", case_sensitive=False)
 
@@ -121,5 +138,7 @@ __all__ = [
     "LLMSettings",
     "GraphRAGSettings",
     "BootstrapSettings",
+    "ChunkingSettings",
+    "StorageSettings",
     "load_settings",
 ]

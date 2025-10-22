@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Enum as SAEnum,
     ForeignKey,
+    Integer,
     JSON,
     MetaData,
     String,
@@ -63,6 +64,9 @@ class Role(TimestampMixin, Base):
     users: Mapped[list["User"]] = relationship(
         secondary=lambda: UserRole.__table__, back_populates="roles", lazy="selectin"
     )
+    collections: Mapped[list["Collection"]] = relationship(
+        secondary=lambda: RoleCollection.__table__, back_populates="roles", lazy="selectin"
+    )
 
 
 class User(TimestampMixin, Base):
@@ -95,6 +99,35 @@ class UserRole(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role_id: Mapped[str] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)
+
+
+class Collection(TimestampMixin, Base):
+    """Logical grouping of documents bound to user roles."""
+
+    __tablename__ = "collections"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(255))
+
+    roles: Mapped[list[Role]] = relationship(
+        secondary=lambda: RoleCollection.__table__, back_populates="collections", lazy="selectin"
+    )
+    ingestion_jobs: Mapped[list["IngestionJob"]] = relationship(
+        back_populates="collection",
+        lazy="selectin",
+    )
+
+
+class RoleCollection(Base):
+    """Association table binding roles to collections."""
+
+    __tablename__ = "role_collections"
+    __table_args__ = (UniqueConstraint("role_id", "collection_id", name="uq_role_collection"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    role_id: Mapped[str] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)
+    collection_id: Mapped[str] = mapped_column(ForeignKey("collections.id", ondelete="CASCADE"), nullable=False)
 
 
 class Conversation(TimestampMixin, Base):
@@ -175,14 +208,54 @@ class IngestionJob(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    collection_id: Mapped[str] = mapped_column(ForeignKey("collections.id", ondelete="CASCADE"), nullable=False)
     status: Mapped[IngestionStatus] = mapped_column(
         SAEnum(IngestionStatus, name="ingestion_status"), default=IngestionStatus.pending, nullable=False
     )
     source: Mapped[str] = mapped_column(String(255), nullable=False)
-    collection_name: Mapped[str] = mapped_column(String(255), nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
+    chunk_size: Mapped[int] = mapped_column(Integer, default=750, nullable=False)
+    chunk_overlap: Mapped[int] = mapped_column(Integer, default=150, nullable=False)
+    parameters: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
     documents: Mapped[list[Document]] = relationship(backref="ingestion_job", lazy="selectin")
+    collection: Mapped[Collection] = relationship(back_populates="ingestion_jobs", lazy="joined")
+
+
+class IngestionStep(str, PyEnum):
+    docling_parse = "docling_parse"
+    chunk_assembly = "chunk_assembly"
+    embedding_indexing = "embedding_indexing"
+    citation_enrichment = "citation_enrichment"
+
+
+class IngestionEventStatus(str, PyEnum):
+    pending = "pending"
+    running = "running"
+    success = "success"
+    failed = "failed"
+
+
+class IngestionEvent(TimestampMixin, Base):
+    """Lifecycle events emitted while processing an ingestion job."""
+
+    __tablename__ = "ingestion_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    job_id: Mapped[str] = mapped_column(ForeignKey("ingestion_jobs.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[Optional[str]] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"))
+    document_title: Mapped[Optional[str]] = mapped_column(String(255))
+    document_path: Mapped[Optional[str]] = mapped_column(String(1024))
+    step: Mapped[IngestionStep] = mapped_column(SAEnum(IngestionStep, name="ingestion_step"), nullable=False)
+    status: Mapped[IngestionEventStatus] = mapped_column(
+        SAEnum(IngestionEventStatus, name="ingestion_event_status"),
+        default=IngestionEventStatus.pending,
+        nullable=False,
+    )
+    detail: Mapped[dict[str, object] | None] = mapped_column(JSON)
+
+    job: Mapped[IngestionJob] = relationship(backref="events", lazy="selectin")
+    document: Mapped[Optional[Document]] = relationship(backref="events", lazy="selectin")
 
 
 AsyncSessionFactory = async_sessionmaker[AsyncSession]
