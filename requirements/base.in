@@ -4,6 +4,9 @@ fastapi-users[sqlalchemy]
 uvicorn[standard]
 sqlalchemy
 asyncpg
+pgvector
+docling
+ollama
 alembic
 pydantic
 pydantic-settings
