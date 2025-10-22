@@ -202,6 +202,18 @@ class DocumentRepository(AsyncRepository[Document]):
         result = await self.session.execute(stmt)
         return list(result.scalars())
 
+    async def get_document(self, document_id: str) -> Document | None:
+        stmt = (
+            select(Document)
+            .options(
+                selectinload(Document.ingestion_job).selectinload(IngestionJob.collection),
+                selectinload(Document.chunks),
+            )
+            .where(Document.id == document_id)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_event_for_step(self, job_id: str, step: IngestionStep) -> Optional[IngestionEvent]:
         stmt = (
             select(IngestionEvent)

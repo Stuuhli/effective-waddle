@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from fastapi import HTTPException, status
 
-from ..config import load_settings
 from ..config import Settings, load_settings
 from ..infrastructure.database import (
     Collection,
+    Document,
     IngestionEvent,
     IngestionEventStatus,
     IngestionJob,
@@ -69,6 +69,19 @@ class IngestionService:
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
         return job
+
+    async def get_document(self, document_id: str, roles: list[Role]) -> Document:
+        document = await self.document_repo.get_document(document_id)
+        if document is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+        ingestion_job = document.ingestion_job
+        if ingestion_job and ingestion_job.collection:
+            allowed_collections = await self.document_repo.list_collections_for_roles(roles)
+            allowed_ids = {collection.id for collection in allowed_collections}
+            if ingestion_job.collection.id not in allowed_ids:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Collection not accessible")
+        return document
 
     async def list_collections(self, roles: list[Role]) -> list[Collection]:
         return await self.document_repo.list_collections_for_roles(roles)

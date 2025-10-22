@@ -683,6 +683,9 @@ class DocumentIngestionPipeline:
                         "image_path": chunk.metadata.get("citation", {}).get("image_path")
                         if isinstance(chunk.metadata.get("citation"), dict)
                         else None,
+                        "image_url": chunk.metadata.get("citation", {}).get("image_url")
+                        if isinstance(chunk.metadata.get("citation"), dict)
+                        else None,
                     }
                     for chunk in chunk_payloads
                 ]
@@ -732,13 +735,26 @@ class DocumentIngestionPipeline:
                 if parsed.metadata:
                     chunk_metadata["document_metadata"] = parsed.metadata
                 citation: dict[str, object] = {"page_number": page.number}
+                image_path: str | None = None
+                docling_hash: str | None = None
                 if page.metadata:
                     chunk_metadata["page_metadata"] = page.metadata
                     image_path = page.metadata.get("image_path")
                     if image_path:
                         citation["image_path"] = image_path
-                    if page.metadata.get("docling_hash"):
-                        citation["docling_hash"] = page.metadata.get("docling_hash")
+                    raw_hash = page.metadata.get("docling_hash")
+                    if isinstance(raw_hash, str) and raw_hash.strip():
+                        docling_hash = raw_hash.strip()
+                if docling_hash is None and isinstance(parsed.metadata, dict):
+                    raw_hash = parsed.metadata.get("docling_hash")
+                    if isinstance(raw_hash, str) and raw_hash.strip():
+                        docling_hash = raw_hash.strip()
+                if docling_hash:
+                    citation["docling_hash"] = docling_hash
+                if image_path or docling_hash:
+                    citation["image_url"] = (
+                        f"/ingestion/documents/{document_id}/pages/{page.number}/preview"
+                    )
                 chunk_metadata["citation"] = citation
                 if job.parameters:
                     chunk_metadata["ingestion_parameters"] = job.parameters

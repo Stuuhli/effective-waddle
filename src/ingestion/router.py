@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 
 from ..auth.dependencies import get_current_user
 from ..infrastructure.database import (
@@ -17,6 +18,7 @@ from ..infrastructure.database import (
     User,
 )
 from .dependencies import get_ingestion_service
+from .docling_images import get_locator
 from .schemas import (
     CollectionResponse,
     IngestionEventResponse,
@@ -182,6 +184,54 @@ async def list_collections(
         )
         for item in summaries
     ]
+
+
+@router.get(
+    "/documents/{document_id}/pages/{page_number}/preview",
+    response_class=FileResponse,
+    responses={
+        200: {"content": {"image/png": {}, "image/jpeg": {}}, "description": "Docling page preview"},
+        404: {"description": "Page preview not available"},
+    },
+)
+async def document_page_preview(
+    document_id: str,
+    page_number: int,
+    user: User = Depends(get_current_user),
+    service: IngestionService = Depends(get_ingestion_service),
+):
+    if page_number <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid page number")
+
+    document = await service.get_document(document_id, user.roles)
+    metadata: dict[str, Any] = {}
+    if isinstance(document.metadata_json, dict):
+        metadata.update(document.metadata_json)
+
+    if metadata.get("docling_hash") is None or metadata.get("image_dir") is None:
+        for chunk in document.chunks:
+            chunk_meta = chunk.metadata_json or {}
+            if not isinstance(chunk_meta, dict):
+                continue
+            citation_meta = chunk_meta.get("citation")
+            if (
+                isinstance(citation_meta, dict)
+                and "docling_hash" in citation_meta
+                and "docling_hash" not in metadata
+            ):
+                metadata["docling_hash"] = citation_meta["docling_hash"]
+            page_meta = chunk_meta.get("page_metadata")
+            if isinstance(page_meta, dict):
+                for key in ("docling_hash", "image_dir"):
+                    if key in page_meta and key not in metadata:
+                        metadata[key] = page_meta[key]
+
+    locator = get_locator(service.settings.storage)
+    image_path = locator.locate_from_metadata(metadata, page_number)
+    if image_path is None or not image_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Page preview not available")
+
+    return FileResponse(image_path, media_type=locator.mimetype_for(image_path), filename=image_path.name)
 
 
 __all__ = ["router"]
