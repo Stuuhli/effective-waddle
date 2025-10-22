@@ -6,7 +6,7 @@ import json
 import mimetypes
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from ..config import StorageSettings, load_settings
 
@@ -121,38 +121,92 @@ class DoclingImageLocator:
         except (FileNotFoundError, json.JSONDecodeError):
             return None
 
-    @staticmethod
-    def _extract_page_image(payload: Mapping[str, object], page_number: int) -> tuple[bytes | None, str]:
-        pages = payload.get("pages")
-        if isinstance(pages, dict):
-            items = pages.items()
-        elif isinstance(pages, list):
-            items = enumerate(pages, start=1)
-        else:
-            return None, ""
+def _iter_pages(payload: Mapping[str, object]) -> Iterable[tuple[int | None, Mapping[str, object]]]:
+    pages = payload.get("pages")
+    if isinstance(pages, dict):
+        for key, value in pages.items():
+            if isinstance(value, Mapping):
+                try:
+                    number = int(key)
+                except (TypeError, ValueError):
+                    number = None
+                yield number, value
+    elif isinstance(pages, list):
+        for index, value in enumerate(pages, start=1):
+            if isinstance(value, Mapping):
+                yield index, value
 
-        for key, page_info in items:
-            if not isinstance(page_info, dict):
-                continue
-            raw_number = page_info.get("page_no", key)
-            try:
-                number = int(raw_number)
-            except (TypeError, ValueError):
-                continue
-            if number != page_number:
-                continue
-            image_info = page_info.get("image")
-            if not isinstance(image_info, dict):
-                return None, ""
-            uri = image_info.get("uri")
-            mimetype = image_info.get("mimetype") if isinstance(image_info.get("mimetype"), str) else None
-            if not isinstance(uri, str):
-                return None, ""
-            image_bytes = _decode_image(uri)
-            if not image_bytes:
-                return None, ""
-            return image_bytes, _image_extension(mimetype)
+    documents = payload.get("documents")
+    if isinstance(documents, list):
+        for document in documents:
+            if isinstance(document, Mapping):
+                yield from _iter_pages(document)
+
+    document = payload.get("document")
+    if isinstance(document, Mapping):
+        yield from _iter_pages(document)
+
+
+def _candidate_media(payload: Mapping[str, object]) -> Iterable[Mapping[str, object] | str]:
+    keys = ("image", "preview_image", "preview", "thumbnail")
+    for key in keys:
+        candidate = payload.get(key)
+        if isinstance(candidate, Mapping) or isinstance(candidate, str):
+            yield candidate
+
+    resources = payload.get("resources")
+    if isinstance(resources, Mapping):
+        for key in keys:
+            candidate = resources.get(key)
+            if isinstance(candidate, Mapping) or isinstance(candidate, str):
+                yield candidate
+        assets = resources.get("assets")
+        if isinstance(assets, list):
+            for asset in assets:
+                if isinstance(asset, Mapping) or isinstance(asset, str):
+                    yield asset
+
+    media = payload.get("media")
+    if isinstance(media, list):
+        for item in media:
+            if isinstance(item, Mapping) or isinstance(item, str):
+                yield item
+
+
+def _media_to_bytes(candidate: Mapping[str, object] | str) -> tuple[bytes | None, str]:
+    if isinstance(candidate, str):
+        uri = candidate
+        mimetype = None
+    else:
+        uri = candidate.get("uri") or candidate.get("data") or candidate.get("source")
+        if isinstance(uri, str) and uri.startswith("file://"):
+            return None, ""
+        mimetype = candidate.get("mimetype") or candidate.get("mime_type") or candidate.get("content_type")
+    if not isinstance(uri, str):
         return None, ""
+    image_bytes = _decode_image(uri)
+    if not image_bytes:
+        return None, ""
+    return image_bytes, _image_extension(mimetype if isinstance(mimetype, str) else None)
+
+
+def _extract_page_image(payload: Mapping[str, object], page_number: int) -> tuple[bytes | None, str]:
+    for fallback_number, page_info in _iter_pages(payload):
+        if not isinstance(page_info, Mapping):
+            continue
+        raw_number = page_info.get("page_no") or page_info.get("page_number") or fallback_number
+        try:
+            number = int(raw_number) if raw_number is not None else None
+        except (TypeError, ValueError):
+            number = None
+        if number != page_number:
+            continue
+        for media in _candidate_media(page_info):
+            image_bytes, extension = _media_to_bytes(media)
+            if image_bytes:
+                return image_bytes, extension
+        return None, ""
+    return None, ""
 
 
 def get_locator(storage: StorageSettings | None = None) -> DoclingImageLocator:

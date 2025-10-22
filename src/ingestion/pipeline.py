@@ -1,4 +1,4 @@
-"""Ingestion pipeline utilities for parsing, chunking and embedding documents."""
+"""Modern ingestion pipeline built around Docling's Document Format v2."""
 from __future__ import annotations
 
 import asyncio
@@ -6,57 +6,63 @@ import base64
 import hashlib
 import json
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Iterable, Mapping, Protocol
 
 from .exceptions import IngestionError
-from ..infrastructure.database import IngestionEvent, IngestionJob
+from ..config import DoclingSettings, StorageSettings, load_settings
+from ..infrastructure.database import IngestionEvent, IngestionEventStatus, IngestionJob, IngestionStep
 from ..infrastructure.embeddings.base import EmbeddingClient
 from ..infrastructure.repositories.document_repo import DocumentRepository
-from ..config import DoclingSettings, StorageSettings, load_settings
-from ..infrastructure.database import IngestionEventStatus, IngestionStep
 
 LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".json"}
 
-_DATA_URI_RE = re.compile(r"data:image/[\w.+-]+;base64,[A-Za-z0-9+/=\s]+")
-_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(data:image/[^)]+\)")
-_HTML_IMAGE_RE = re.compile(r"<img\b[^>]*src=(?:\"|')data:image/[^\"']+(?:\"|')[^>]*>", re.IGNORECASE)
-_MAX_WORD_CHARS = 4096
 
-def _normalise_value(value: Any) -> object:
+def _serialise(value: Any) -> object:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
-    if isinstance(value, dict):
-        return {str(key): _normalise_value(val) for key, val in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_normalise_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): _serialise(val) for key, val in value.items()}
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
+        return [_serialise(item) for item in value]
     return str(value)
 
 
-def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, object]:
-    return {str(key): _normalise_value(value) for key, value in metadata.items()}
+def _sanitize_metadata(metadata: Mapping[str, Any] | None) -> dict[str, object]:
+    if not metadata:
+        return {}
+    return {str(key): _serialise(value) for key, value in metadata.items()}
 
 
-def _extract_metadata(raw: Any) -> dict[str, object]:
-    if raw is None:
-        return {}
-    if isinstance(raw, dict):
-        items = raw.items()
-    elif hasattr(raw, "__dict__"):
-        items = vars(raw).items()
-    else:
-        return {}
-    return _sanitize_metadata({key: value for key, value in items if not str(key).startswith("_")})
+def _decode_image(uri: str) -> bytes | None:
+    if not isinstance(uri, str) or not uri.startswith("data:image"):
+        return None
+    try:
+        _, data = uri.split(",", 1)
+    except ValueError:
+        return None
+    try:
+        return base64.b64decode(data)
+    except (base64.binascii.Error, ValueError):
+        return None
+
+
+def _image_extension(mimetype: str | None) -> str:
+    if not mimetype or "/" not in mimetype:
+        return ".png"
+    subtype = mimetype.split("/", 1)[1].lower()
+    if subtype in {"jpeg", "jpg"}:
+        return ".jpg"
+    if subtype in {"png", "gif", "webp", "bmp"}:
+        return f".{subtype}"
+    return ".png"
 
 
 @dataclass(slots=True)
 class ParsedPage:
-    """Parsed representation of a single document page."""
-
     number: int
     content: str
     metadata: dict[str, object]
@@ -64,8 +70,6 @@ class ParsedPage:
 
 @dataclass(slots=True)
 class ParsedDocument:
-    """Representation of a parsed document ready for chunking."""
-
     title: str
     pages: list[ParsedPage]
     metadata: dict[str, object]
@@ -73,84 +77,17 @@ class ParsedDocument:
 
 @dataclass(slots=True)
 class ChunkPayload:
-    """Chunk ready for embedding and persistence."""
-
     text: str
     metadata: dict[str, object]
 
 
 class DocumentParser(Protocol):
-    """Protocol for document parsing backends."""
-
     async def parse(self, path: Path) -> list[ParsedDocument]:
-        """Parse the given path into parsed documents."""
-
-
-def _extract_document_text(document: Any, path: Path) -> str:
-    if hasattr(document, "export_to_text"):
-        try:
-            return str(document.export_to_text())
-        except Exception:  # pragma: no cover - defensive
-            LOGGER.debug("export_to_text failed for %s", path, exc_info=True)
-    if hasattr(document, "to_text"):
-        try:
-            return str(document.to_text())
-        except Exception:  # pragma: no cover - defensive
-            LOGGER.debug("to_text failed for %s", path, exc_info=True)
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except UnicodeDecodeError as exc:  # pragma: no cover - depends on input
-        raise IngestionError(f"Unable to read {path} as UTF-8 text") from exc
-
-
-def _extract_page_text(page: Any) -> str:
-    for attr in ("text", "content", "plain_text"):
-        value = getattr(page, attr, None)
-        if isinstance(value, str) and value.strip():
-            return value
-    for attr in ("export_to_text", "to_text"):
-        method = getattr(page, attr, None)
-        if callable(method):
-            try:
-                value = method()
-            except Exception:  # pragma: no cover - defensive
-                continue
-            if isinstance(value, str) and value.strip():
-                return value
-    return ""
-
-def _sanitize_page_text(text: str) -> str:
-    """Remove large binary payloads such as inline data URIs from page text."""
-
-    if not text:
-        return ""
-
-    cleaned = _MARKDOWN_IMAGE_RE.sub(" ", text)
-    cleaned = _HTML_IMAGE_RE.sub(" ", cleaned)
-    cleaned = _DATA_URI_RE.sub(" ", cleaned)
-    cleaned = cleaned.replace("<!-- image -->", " ")
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned.strip()
-
-
-def _split_long_tokens(words: list[str], *, max_length: int = _MAX_WORD_CHARS) -> list[str]:
-    """Ensure extremely long tokens are broken into manageable segments."""
-
-    if not words:
-        return []
-
-    result: list[str] = []
-    for word in words:
-        if len(word) <= max_length:
-            result.append(word)
-            continue
-        for index in range(0, len(word), max_length):
-            result.append(word[index : index + max_length])
-    return result
+        """Parse the provided path into parsed document representations."""
 
 
 class DoclingParser:
-    """Parse documents using Docling when available."""
+    """Parser implementation that prefers Docling's Document Format v2."""
 
     def __init__(
         self,
@@ -161,60 +98,28 @@ class DoclingParser:
         self._storage = storage_settings or settings.storage
         self._docling_settings = docling_settings or settings.docling
 
-        if not self._docling_settings.enabled:
-            LOGGER.warning("Docling parsing disabled via configuration, falling back to plain text parsing")
-            self._converter = None
-        else:
-            try:
-                from docling.datamodel.base_models import InputFormat
-                from docling.datamodel.pipeline_options import (
-                    AcceleratorDevice,
-                    AcceleratorOptions,
-                    PdfPipelineOptions,
-                    TableFormerMode,
-                )
-                from docling.document_converter import DocumentConverter, PdfFormatOption
-            except Exception:  # pragma: no cover - optional dependency resolution
-                LOGGER.warning("Docling not available, falling back to plain text parsing")
-                self._converter = None
-            else:
-                pdf_options = PdfPipelineOptions()
-                pdf_options.do_ocr = self._docling_settings.do_ocr
-                pdf_options.do_table_structure = self._docling_settings.do_table_structure
-                if self._docling_settings.do_table_structure:
-                    try:
-                        table_mode = TableFormerMode[self._docling_settings.table_mode.upper()]
-                    except KeyError:
-                        LOGGER.warning(
-                            "Unknown Docling table mode '%s', defaulting to ACCURATE.",
-                            self._docling_settings.table_mode,
-                        )
-                        table_mode = TableFormerMode.ACCURATE
-                    pdf_options.table_structure_options.mode = table_mode
-                    pdf_options.table_structure_options.do_cell_matching = self._docling_settings.table_cell_matching
-                pdf_options.generate_page_images = self._docling_settings.generate_page_images
-                pdf_options.images_scale = self._docling_settings.image_scale
-
-                device = (
-                    AcceleratorDevice.CUDA
-                    if self._docling_settings.accelerator_device.lower() == "cuda"
-                    else AcceleratorDevice.CPU
-                )
-                accel_kwargs: dict[str, object] = {"device": device}
-                if self._docling_settings.accelerator_num_threads > 0:
-                    accel_kwargs["num_threads"] = self._docling_settings.accelerator_num_threads
-                pdf_options.accelerator_options = AcceleratorOptions(**accel_kwargs)
-
-                format_options = {
-                    InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),
-                }
-                self._converter = DocumentConverter(format_options=format_options)
-
-        self._docling_dir = Path(self._storage.docling_output_dir)
-        self._hash_index_path = Path(self._storage.docling_hash_index)
+        self._converter = self._initialise_converter()
+        self._docling_dir = Path(self._storage.docling_output_dir).resolve()
+        self._docling_dir.mkdir(parents=True, exist_ok=True)
+        self._hash_index_path = Path(self._storage.docling_hash_index).resolve()
         self._hash_index_path.parent.mkdir(parents=True, exist_ok=True)
         if not self._hash_index_path.exists():
             self._hash_index_path.write_text("{}", encoding="utf-8")
+
+    def _initialise_converter(self) -> Any | None:
+        if not self._docling_settings.enabled:
+            LOGGER.info("Docling parsing disabled via configuration; falling back to plaintext parsing")
+            return None
+        try:
+            from docling.document_converter import DocumentConverter  # type: ignore
+        except Exception:  # pragma: no cover - optional dependency
+            LOGGER.warning("Docling library not available; falling back to plaintext parsing")
+            return None
+        try:
+            return DocumentConverter()
+        except Exception:  # pragma: no cover - optional dependency setup
+            LOGGER.warning("Failed to instantiate Docling converter; falling back to plaintext", exc_info=True)
+            return None
 
     def _load_hash_index(self) -> dict[str, str]:
         try:
@@ -222,8 +127,8 @@ class DoclingParser:
         except (FileNotFoundError, json.JSONDecodeError):  # pragma: no cover - defensive
             return {}
 
-    def _save_hash_index(self, index: dict[str, str]) -> None:
-        self._hash_index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    def _save_hash_index(self, index: Mapping[str, str]) -> None:
+        self._hash_index_path.write_text(json.dumps(dict(index), ensure_ascii=False, indent=2), encoding="utf-8")
 
     @staticmethod
     def _create_file_hash(path: Path) -> str:
@@ -234,279 +139,350 @@ class DoclingParser:
         return hasher.hexdigest()
 
     @staticmethod
-    def _decode_image(uri: str) -> bytes | None:
-        if not uri or not uri.startswith("data:image"):
-            return None
-        try:
-            _, data = uri.split(",", 1)
-        except ValueError:  # pragma: no cover - defensive
-            return None
-        try:
-            return base64.b64decode(data)
-        except base64.binascii.Error:  # pragma: no cover - defensive
-            return None
-
-    @staticmethod
-    def _image_extension(mimetype: str | None) -> str:
-        if not mimetype or "/" not in mimetype:
-            return ".png"
-        subtype = mimetype.split("/", 1)[1].lower()
-        if subtype in {"jpeg", "jpg"}:
-            return ".jpg"
-        if subtype in {"png", "gif", "webp", "bmp"}:
-            return f".{subtype}"
-        return ".png"
-
-    def _export_page_images(self, json_path: Path, cache_dir: Path) -> dict[int, str]:
-        page_images: dict[int, str] = {}
-        try:
-            raw = json.loads(json_path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError):  # pragma: no cover - defensive
-            return page_images
-
-        pages = raw.get("pages")
-        if not isinstance(pages, dict):
-            return page_images
-
-        for key, page_info in pages.items():
-            if not isinstance(page_info, dict):
-                continue
-
-            image_info = page_info.get("image")
-            if not isinstance(image_info, dict):
-                continue
-            uri = image_info.get("uri")
-            if not isinstance(uri, str):
-                continue
-            mimetype = image_info.get("mimetype")
-            extension = self._image_extension(mimetype if isinstance(mimetype, str) else None)
-            raw_number = page_info.get("page_no", key)
-            try:
-                number = int(raw_number)
-            except (TypeError, ValueError):
+    def _normalise_object(value: Any) -> Any:
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        if isinstance(value, Mapping):
+            return {str(key): DoclingParser._normalise_object(val) for key, val in value.items()}
+        if isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
+            return [DoclingParser._normalise_object(item) for item in value]
+        for method_name in ("model_dump", "dict", "to_dict"):
+            method = getattr(value, method_name, None)
+            if callable(method):
                 try:
-                    number = int(key)
-                except (TypeError, ValueError):
-                    continue
-            image_path = cache_dir / f"page-{number}{extension}"
-            if not image_path.exists():
-                image_bytes = self._decode_image(uri)
-                if not image_bytes:
-                    continue
-                image_path.write_bytes(image_bytes)
-            page_images[number] = str(image_path)
-        return page_images
+                    data = method()
+                except TypeError:
+                    try:
+                        data = method(mode="json")
+                    except TypeError:
+                        continue
+                return DoclingParser._normalise_object(data)
+        if hasattr(value, "__dict__"):
+            return {
+                str(key): DoclingParser._normalise_object(val)
+                for key, val in vars(value).items()
+                if not str(key).startswith("_")
+            }
+        return str(value)
 
-    @staticmethod
-    def _serialize_markdown(document: Any) -> str | None:
-        try:
-            from docling_core.transforms.serializer.markdown import MarkdownDocSerializer  # type: ignore[attr-defined]
-        except Exception:  # pragma: no cover - optional dependency resolution
-            return None
-        try:
-            serializer = MarkdownDocSerializer(doc=document)
-            serialized = serializer.serialize()
-        except Exception:  # pragma: no cover - serialization defensive
-            LOGGER.debug("Docling markdown serialization failed", exc_info=True)
-            return None
-        if isinstance(serialized, str):
-            return serialized
-        return getattr(serialized, "markdown", None) or getattr(serialized, "content", None)
+    def _looks_like_document_format(self, payload: Mapping[str, Any]) -> bool:
+        if "pages" in payload and isinstance(payload["pages"], (list, Mapping)):
+            return True
+        document = payload.get("document")
+        if isinstance(document, Mapping) and "pages" in document:
+            return True
+        return False
 
-    @staticmethod
-    def _extract_section_summaries(document: Any) -> list[dict[str, object]]:
-        try:
-            from docling_core.types.doc.document import SectionHeaderItem  # type: ignore[attr-defined]
-        except Exception:  # pragma: no cover - optional dependency resolution
+    def _discover_document_formats(self, payload: Any) -> list[dict[str, Any]]:
+        discovered: list[dict[str, Any]] = []
+
+        def _walk(value: Any) -> None:
+            normalised = self._normalise_object(value)
+            if isinstance(normalised, Mapping):
+                if self._looks_like_document_format(normalised):
+                    discovered.append(dict(normalised))
+                    return
+                for key in ("documents", "items", "results", "document", "document_format"):
+                    if key in normalised:
+                        _walk(normalised[key])
+                return
+            if isinstance(normalised, Iterable) and not isinstance(normalised, (str, bytes, bytearray)):
+                for item in normalised:
+                    _walk(item)
+
+        _walk(payload)
+        return discovered
+
+    def _load_cached_document(self, json_path: Path) -> list[dict[str, Any]]:
+        payload = self._normalise_object(self._read_json(json_path))
+        if not payload:
             return []
+        if isinstance(payload, Mapping) and self._looks_like_document_format(payload):
+            return [dict(payload)]
+        return self._discover_document_formats(payload)
+
+    @staticmethod
+    def _read_json(path: Path) -> Any:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+    @staticmethod
+    def _persist_json(path: Path, payload: Mapping[str, Any]) -> None:
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _parse_plaintext(self, path: Path) -> list[ParsedDocument]:
+        try:
+            content = path.read_text(encoding="utf-8", errors="ignore")
+        except UnicodeDecodeError as exc:  # pragma: no cover - depends on input
+            raise IngestionError(f"Unable to read {path} as UTF-8 text") from exc
+        metadata = _sanitize_metadata({"source_path": str(path), "title": path.stem, "document_name": path.name})
+        page = ParsedPage(number=1, content=content, metadata=metadata)
+        return [ParsedDocument(title=path.stem, pages=[page], metadata=metadata)]
+
+    def _materialise_preview(
+        self,
+        page_payload: Mapping[str, Any],
+        cache_dir: Path,
+        page_number: int,
+    ) -> str | None:
+        candidates: list[Any] = []
+        for key in ("preview_image", "preview", "image", "thumbnail"):
+            if key in page_payload:
+                candidates.append(page_payload[key])
+        resources = page_payload.get("resources")
+        if isinstance(resources, Mapping):
+            for key in ("preview_image", "preview", "image", "thumbnail"):
+                if key in resources:
+                    candidates.append(resources[key])
+            assets = resources.get("assets")
+            if isinstance(assets, Iterable) and not isinstance(assets, (str, bytes, bytearray)):
+                candidates.extend(assets)
+        media = page_payload.get("media")
+        if isinstance(media, Iterable) and not isinstance(media, (str, bytes, bytearray)):
+            candidates.extend(media)
+
+        for candidate in candidates:
+            materialised = self._extract_image_path(candidate, cache_dir, page_number)
+            if materialised:
+                return materialised
+        return None
+
+    def _extract_image_path(self, media: Any, cache_dir: Path, page_number: int) -> str | None:
+        payload = self._normalise_object(media)
+        if isinstance(payload, str):
+            if payload.startswith("data:image"):
+                image_bytes = _decode_image(payload)
+                if not image_bytes:
+                    return None
+                extension = ".png"
+                target = cache_dir / f"page-{page_number}{extension}"
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(image_bytes)
+                return str(target)
+            candidate_path = Path(payload)
+            if not candidate_path.is_absolute():
+                candidate_path = (cache_dir / payload).resolve()
+            if candidate_path.exists():
+                return str(candidate_path)
+            return None
+        if not isinstance(payload, Mapping):
+            return None
+        path_value = payload.get("path") or payload.get("file") or payload.get("href")
+        if isinstance(path_value, str) and path_value.strip():
+            candidate_path = Path(path_value)
+            if not candidate_path.is_absolute():
+                candidate_path = (cache_dir / path_value).resolve()
+            if candidate_path.exists():
+                return str(candidate_path)
+        uri = payload.get("uri") or payload.get("data") or payload.get("source")
+        if isinstance(uri, str) and uri.startswith("data:image"):
+            image_bytes = _decode_image(uri)
+            if not image_bytes:
+                return None
+            mimetype = payload.get("mimetype") or payload.get("mime_type") or payload.get("content_type")
+            extension = _image_extension(str(mimetype) if isinstance(mimetype, str) else None)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            target = cache_dir / f"page-{page_number}{extension}"
+            target.write_bytes(image_bytes)
+            return str(target)
+        if isinstance(uri, str) and uri.startswith("file://"):
+            candidate_path = Path(uri.replace("file://", ""))
+            if candidate_path.exists():
+                return str(candidate_path.resolve())
+        return None
+
+    def _page_text(self, page_payload: Mapping[str, Any]) -> str:
+        for key in ("text", "content", "plain_text"):
+            value = page_payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        blocks = page_payload.get("blocks") or page_payload.get("elements")
+        if isinstance(blocks, Iterable) and not isinstance(blocks, (str, bytes, bytearray)):
+            parts: list[str] = []
+            for block in blocks:
+                if isinstance(block, Mapping):
+                    text = block.get("text") or block.get("content")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text.strip())
+            if parts:
+                return "\n\n".join(parts)
+        return ""
+
+    def _extract_sections(self, document_payload: Mapping[str, Any]) -> list[dict[str, object]]:
         sections: list[dict[str, object]] = []
-        spans = getattr(document, "spans", []) or []
-        for span in spans:
-            item = getattr(span, "item", None)
-            if not isinstance(item, SectionHeaderItem):
-                continue
-            heading = getattr(item, "orig", None) or getattr(item, "title", None)
-            if not isinstance(heading, str):
-                continue
-            page_numbers: list[int] = []
-            for prov in getattr(item, "prov", []) or []:
-                page_no = getattr(prov, "page_no", None)
-                if isinstance(page_no, int):
-                    page_numbers.append(page_no)
-            sections.append(
-                {
-                    "heading": heading.strip(),
-                    "pages": sorted(set(page_numbers)),
-                }
-            )
+        raw_sections = document_payload.get("sections") or document_payload.get("outline")
+        if isinstance(raw_sections, Iterable) and not isinstance(raw_sections, (str, bytes, bytearray)):
+            for section in raw_sections:
+                section_payload = section if isinstance(section, Mapping) else self._normalise_object(section)
+                if not isinstance(section_payload, Mapping):
+                    continue
+                heading = section_payload.get("title") or section_payload.get("heading") or section_payload.get("label")
+                if not isinstance(heading, str) or not heading.strip():
+                    continue
+                pages = section_payload.get("pages") or section_payload.get("page_numbers")
+                if isinstance(pages, Iterable) and not isinstance(pages, (str, bytes, bytearray)):
+                    page_numbers = [
+                        int(page)
+                        for page in pages
+                        if isinstance(page, (int, float)) or (isinstance(page, str) and page.isdigit())
+                    ]
+                else:
+                    page_numbers = []
+                sections.append({"heading": heading.strip(), "pages": sorted(set(page_numbers))})
         return sections
 
-    async def parse(self, path: Path) -> list[ParsedDocument]:
-        if self._converter is None:
-            LOGGER.debug("Reading %s as plaintext", path)
-            try:
-                content = path.read_text(encoding="utf-8", errors="ignore")
-            except UnicodeDecodeError as exc:  # pragma: no cover - depends on input
-                raise IngestionError(f"Unable to read {path} as UTF-8 text") from exc
-            metadata = _sanitize_metadata(
-                {"source_path": str(path), "title": path.stem, "document_name": path.name}
+    def _extract_metadata(self, document_payload: Mapping[str, Any]) -> dict[str, object]:
+        metadata: dict[str, object] = {}
+        for key in ("metadata", "info", "attributes", "properties"):
+            raw = document_payload.get(key)
+            if isinstance(raw, Mapping):
+                metadata.update(_sanitize_metadata(raw))
+        return metadata
+
+    def _extract_markdown(self, payload: Mapping[str, Any]) -> str | None:
+        exports = payload.get("exports") or payload.get("outputs")
+        if isinstance(exports, Mapping):
+            markdown = exports.get("markdown")
+            if isinstance(markdown, str) and markdown.strip():
+                return markdown
+        document_payload = payload.get("document")
+        if isinstance(document_payload, Mapping):
+            markdown = document_payload.get("markdown")
+            if isinstance(markdown, str) and markdown.strip():
+                return markdown
+        return None
+
+    def _prepare_pages(
+        self,
+        document_payload: Mapping[str, Any],
+        path: Path,
+        file_hash: str,
+        cache_dir: Path,
+        json_path: Path,
+    ) -> list[ParsedPage]:
+        pages_raw = document_payload.get("pages")
+        if isinstance(pages_raw, Mapping):
+            iterable = pages_raw.values()
+        elif isinstance(pages_raw, Iterable) and not isinstance(pages_raw, (str, bytes, bytearray)):
+            iterable = pages_raw
+        else:
+            iterable = []
+        pages: list[ParsedPage] = []
+        for index, raw_page in enumerate(iterable, start=1):
+            page_payload = raw_page if isinstance(raw_page, Mapping) else self._normalise_object(raw_page)
+            if not isinstance(page_payload, Mapping):
+                continue
+            raw_number = (
+                page_payload.get("page_number")
+                or page_payload.get("page_no")
+                or page_payload.get("number")
+                or page_payload.get("index")
             )
-            page = ParsedPage(number=1, content=content, metadata=metadata)
-            return [ParsedDocument(title=path.stem, pages=[page], metadata=metadata)]
+            try:
+                page_number = int(raw_number) if raw_number is not None else index
+            except (TypeError, ValueError):
+                page_number = index
+            text = self._page_text(page_payload)
+            if not text.strip():
+                continue
+            page_metadata = _sanitize_metadata(page_payload.get("metadata") if isinstance(page_payload.get("metadata"), Mapping) else None)
+            page_metadata.setdefault("page_number", page_number)
+            page_metadata.setdefault("docling_hash", file_hash)
+            page_metadata.setdefault("docling_output", str(json_path))
+            page_metadata.setdefault("image_dir", str(cache_dir))
+            page_metadata.setdefault("source_path", str(path))
+            preview_path = self._materialise_preview(page_payload, cache_dir, page_number)
+            if preview_path:
+                page_metadata["image_path"] = preview_path
+            pages.append(ParsedPage(number=page_number, content=text, metadata=page_metadata))
+        return pages
 
-        def _convert() -> list[ParsedDocument]:
-            file_hash = self._create_file_hash(path)
-            cache_dir = self._docling_dir / file_hash
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            json_path = cache_dir / f"{file_hash}.json"
-            metadata_path = cache_dir / "conversion-metadata.json"
-
-            metadata_dump: dict[str, Any] = {}
-            document: Any | None = None
-
-            cache_hit = json_path.exists()
-            if cache_hit:
-                try:
-                    from docling_core.types.doc.document import DoclingDocument  # type: ignore[attr-defined]
-
-                    document = DoclingDocument.load_from_json(json_path)
-                    if metadata_path.exists():
-                        metadata_dump = json.loads(metadata_path.read_text(encoding="utf-8"))
-                except Exception as exc:  # pragma: no cover - corrupted cache
-                    LOGGER.warning("Failed to load cached Docling artefacts for %s: %s. Re-parsing.", path, exc)
-                    document = None
-                    metadata_dump = {}
-                    cache_hit = False
-
-            if document is None:
-                result = self._converter.convert(str(path))
-                document = result.document
-                try:
-                    document.save_as_json(json_path)  # type: ignore[attr-defined]
-                except Exception:  # pragma: no cover - best effort persistence
-                    LOGGER.debug("Unable to persist Docling JSON for %s", path, exc_info=True)
-                try:
-                    metadata_dump = result.model_dump()
-                    metadata_path.write_text(
-                        json.dumps(metadata_dump, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                except Exception:  # pragma: no cover - serialization guard
-                    LOGGER.debug("Skipping Docling metadata persistence for %s", path, exc_info=True)
-                    metadata_dump = {}
-
-            hash_index = self._load_hash_index()
-            if hash_index.get(str(path)) != file_hash:
-                hash_index[str(path)] = file_hash
-                self._save_hash_index(hash_index)
-
-            page_images = self._export_page_images(json_path, cache_dir)
-
-            title = None
-            metadata_obj = getattr(document, "metadata", None)
-            if metadata_obj is not None:
-                title = getattr(metadata_obj, "title", None)
-            if not title:
-                title = getattr(document, "title", None)
-            title = title or path.stem
-
-            document_metadata: dict[str, object] = {
+    def _prepare_document(
+        self,
+        document_payload: Mapping[str, Any],
+        path: Path,
+        file_hash: str,
+        cache_dir: Path,
+        json_path: Path,
+    ) -> ParsedDocument:
+        payload = document_payload.get("document") if isinstance(document_payload.get("document"), Mapping) else document_payload
+        metadata = self._extract_metadata(payload)
+        metadata.update(
+            {
                 "source_path": str(path),
-                "title": title,
-                "document_name": path.name,
                 "docling_hash": file_hash,
                 "docling_output": str(json_path),
                 "image_dir": str(cache_dir),
-                "docling_cache_hit": cache_hit,
             }
-            document_metadata.update(_extract_metadata(metadata_dump.get("metadata")))
-            document_metadata.update(_extract_metadata(metadata_dump.get("document")))
-            document_metadata.update(_extract_metadata(metadata_obj))
-            markdown_text = self._serialize_markdown(document)
-            if markdown_text:
-                document_metadata["markdown"] = markdown_text
-            section_summaries = self._extract_section_summaries(document)
-            if section_summaries:
-                document_metadata["sections"] = section_summaries
-            document_metadata = _sanitize_metadata(document_metadata)
+        )
+        schema_version = document_payload.get("schema_version") or payload.get("schema_version")
+        if schema_version:
+            metadata["docling_schema_version"] = schema_version
+        sections = self._extract_sections(payload)
+        if sections:
+            metadata["sections"] = sections
+        markdown = self._extract_markdown(document_payload)
+        if markdown:
+            metadata["markdown"] = markdown
+        title = metadata.get("title") or payload.get("title") or payload.get("name") or path.stem
+        pages = self._prepare_pages(payload, path, file_hash, cache_dir, json_path)
+        if not pages:
+            fallback_text = payload.get("text") or payload.get("content") or ""
+            fallback_metadata = {
+                "source_path": str(path),
+                "docling_hash": file_hash,
+                "docling_output": str(json_path),
+                "image_dir": str(cache_dir),
+            }
+            pages = [ParsedPage(number=1, content=str(fallback_text), metadata=_sanitize_metadata(fallback_metadata))]
+        return ParsedDocument(title=str(title), pages=pages, metadata=_sanitize_metadata(metadata))
 
-            pages: list[ParsedPage] = []
-            raw_pages = getattr(document, "pages", None) or []
-            if isinstance(raw_pages, dict):
-                raw_pages = list(raw_pages.values())
+    def _parse_with_docling(self, path: Path) -> list[ParsedDocument]:
+        file_hash = self._create_file_hash(path)
+        cache_dir = (self._docling_dir / file_hash).resolve()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        json_path = cache_dir / f"{file_hash}.json"
 
-            for index, page in enumerate(raw_pages, start=1):
-                page_text = _sanitize_page_text(_extract_page_text(page))
-                if not page_text.strip():
-                    continue
-                raw_number = getattr(page, "page_no", None) or getattr(page, "number", None)
-                try:
-                    number = int(raw_number) if raw_number is not None else index
-                except (TypeError, ValueError):
-                    number = index
-                page_meta: dict[str, object] = {
-                    "source_path": str(path),
-                    "document_title": title,
-                    "document_name": path.name,
-                    "docling_hash": file_hash,
-                }
-                page_meta.update(_extract_metadata(getattr(page, "metadata", None)))
-                page_meta.update(_extract_metadata(getattr(page, "attrs", None)))
-                image_path_value: str | None = page_images.get(number)
-                image_attr = getattr(page, "image", None)
-                image_uri: str | None = None
-                image_mimetype: str | None = None
-                if isinstance(image_attr, dict):
-                    image_uri = image_attr.get("uri")
-                    image_mimetype = image_attr.get("mimetype")
-                else:
-                    image_uri = getattr(image_attr, "uri", None)
-                    image_mimetype = getattr(image_attr, "mimetype", None)
-                if not image_path_value and image_uri:
-                    extension = self._image_extension(
-                        image_mimetype if isinstance(image_mimetype, str) else None
-                    )
-                    image_path = cache_dir / f"page-{number}{extension}"
-                    if image_path.exists():
-                        image_path_value = str(image_path)
-                    else:
-                        image_bytes = self._decode_image(str(image_uri))
-                        if image_bytes:
-                            image_path.write_bytes(image_bytes)
-                            image_path_value = str(image_path)
-                    if image_path_value:
-                        page_images[number] = image_path_value
-                if image_path_value:
-                    page_meta["image_path"] = image_path_value
-                pages.append(
-                    ParsedPage(
-                        number=number,
-                        content=page_text,
-                        metadata=_sanitize_metadata(page_meta),
-                    )
-                )
+        documents = self._load_cached_document(json_path)
+        if not documents and self._converter is not None:
+            try:
+                result = self._converter.convert(str(path))
+            except Exception as exc:  # pragma: no cover - depends on converter
+                raise IngestionError(f"Docling conversion failed for {path}") from exc
+            documents = self._discover_document_formats(result)
+            if not documents:
+                LOGGER.warning("Docling conversion for %s produced no document format; falling back to plaintext", path)
+                return self._parse_plaintext(path)
+            try:
+                self._persist_json(json_path, documents[0])
+            except Exception:  # pragma: no cover - best effort persistence
+                LOGGER.debug("Unable to persist Docling JSON for %s", path, exc_info=True)
+        elif not documents:
+            return self._parse_plaintext(path)
 
-            if not pages:
-                content = _sanitize_page_text(_extract_document_text(document, path))
-                metadata = _sanitize_metadata(
-                    {
-                        "source_path": str(path),
-                        "title": title,
-                        "document_name": path.name,
-                        "docling_hash": file_hash,
-                        "docling_output": str(json_path),
-                        "image_dir": str(cache_dir),
-                    }
-                )
-                pages.append(ParsedPage(number=1, content=content, metadata=metadata))
+        hash_index = self._load_hash_index()
+        if hash_index.get(str(path)) != file_hash:
+            updated = dict(hash_index)
+            updated[str(path)] = file_hash
+            self._save_hash_index(updated)
 
-            return [ParsedDocument(title=title, pages=pages, metadata=document_metadata)]
+        parsed: list[ParsedDocument] = []
+        for document_payload in documents:
+            if not isinstance(document_payload, Mapping):
+                continue
+            parsed.append(self._prepare_document(document_payload, path, file_hash, cache_dir, json_path))
+        return parsed or self._parse_plaintext(path)
 
-        return await asyncio.to_thread(_convert)
+    async def parse(self, path: Path) -> list[ParsedDocument]:
+        if self._converter is None:
+            return self._parse_plaintext(path)
+        return await asyncio.to_thread(self._parse_with_docling, path)
 
 
 class DocumentIngestionPipeline:
-    """Coordinate the end-to-end ingestion process."""
+    """Coordinate ingestion: parsing, chunking, embedding and persistence."""
 
     def __init__(
         self,
@@ -550,13 +526,8 @@ class DocumentIngestionPipeline:
             raise IngestionError(f"No documents found at source: {job.source}")
 
         for path in paths:
-            LOGGER.info("Parsing document %s", path)
             path_str = str(path)
-            docling_event = await self._ensure_event(
-                job,
-                IngestionStep.docling_parse,
-                document_path=path_str,
-            )
+            docling_event = await self._ensure_event(job, IngestionStep.docling_parse, document_path=path_str)
             await self.repository.update_event_status(
                 docling_event,
                 status=IngestionEventStatus.running,
@@ -579,24 +550,21 @@ class DocumentIngestionPipeline:
                 detail={"documents": len(parsed_documents)},
             )
             await self.repository.commit()
-            for parsed in parsed_documents:
-                document_metadata = dict(parsed.metadata)
+
+            for parsed_document in parsed_documents:
+                document_metadata = dict(parsed_document.metadata)
                 document_metadata["ingestion_job_id"] = job.id
                 document_metadata = _sanitize_metadata(document_metadata)
                 document = await self.repository.create_document(
-                    title=parsed.title or path.stem,
-                    source_path=str(path),
+                    title=parsed_document.title or path.stem,
+                    source_path=path_str,
                     collection_name=job.collection.name if job.collection else "default",
                     metadata=document_metadata,
                     job=job,
                 )
                 await self.repository.commit()
 
-                chunk_event = await self._ensure_event(
-                    job,
-                    IngestionStep.chunk_assembly,
-                    document_path=path_str,
-                )
+                chunk_event = await self._ensure_event(job, IngestionStep.chunk_assembly, document_path=path_str)
                 await self.repository.update_event_status(
                     chunk_event,
                     status=IngestionEventStatus.running,
@@ -607,24 +575,13 @@ class DocumentIngestionPipeline:
                 await self.repository.commit()
 
                 chunk_payloads = self._prepare_chunks(
-                    parsed,
+                    parsed_document,
                     document.id,
                     path,
                     job,
                     chunk_size=job.chunk_size or self.chunk_size,
                     chunk_overlap=job.chunk_overlap or self.chunk_overlap,
                 )
-                if not chunk_payloads:
-                    LOGGER.debug("Document %s produced no chunks", path)
-                    await self.repository.update_event_status(
-                        chunk_event,
-                        status=IngestionEventStatus.success,
-                        document_id=document.id,
-                        document_title=document.title,
-                        detail={"chunks": 0},
-                    )
-                    await self.repository.commit()
-                    continue
 
                 await self.repository.update_event_status(
                     chunk_event,
@@ -635,11 +592,10 @@ class DocumentIngestionPipeline:
                 )
                 await self.repository.commit()
 
-                embedding_event = await self._ensure_event(
-                    job,
-                    IngestionStep.embedding_indexing,
-                    document_path=path_str,
-                )
+                if not chunk_payloads:
+                    continue
+
+                embedding_event = await self._ensure_event(job, IngestionStep.embedding_indexing, document_path=path_str)
                 await self.repository.update_event_status(
                     embedding_event,
                     status=IngestionEventStatus.running,
@@ -671,20 +627,16 @@ class DocumentIngestionPipeline:
                 )
                 await self.repository.commit()
 
-                citation_event = await self._ensure_event(
-                    job,
-                    IngestionStep.citation_enrichment,
-                    document_path=path_str,
-                )
+                citation_event = await self._ensure_event(job, IngestionStep.citation_enrichment, document_path=path_str)
                 citations = [
                     {
                         "chunk_index": chunk.metadata.get("chunk_index"),
                         "page_number": chunk.metadata.get("page_number"),
                         "image_path": chunk.metadata.get("citation", {}).get("image_path")
-                        if isinstance(chunk.metadata.get("citation"), dict)
+                        if isinstance(chunk.metadata.get("citation"), Mapping)
                         else None,
                         "image_url": chunk.metadata.get("citation", {}).get("image_url")
-                        if isinstance(chunk.metadata.get("citation"), dict)
+                        if isinstance(chunk.metadata.get("citation"), Mapping)
                         else None,
                     }
                     for chunk in chunk_payloads
@@ -735,26 +687,24 @@ class DocumentIngestionPipeline:
                 if parsed.metadata:
                     chunk_metadata["document_metadata"] = parsed.metadata
                 citation: dict[str, object] = {"page_number": page.number}
+                page_hash = None
                 image_path: str | None = None
-                docling_hash: str | None = None
                 if page.metadata:
                     chunk_metadata["page_metadata"] = page.metadata
-                    image_path = page.metadata.get("image_path")
-                    if image_path:
-                        citation["image_path"] = image_path
+                    image_path = page.metadata.get("image_path")  # type: ignore[assignment]
+                    if isinstance(image_path, str) and image_path.strip():
+                        citation["image_path"] = image_path.strip()
                     raw_hash = page.metadata.get("docling_hash")
                     if isinstance(raw_hash, str) and raw_hash.strip():
-                        docling_hash = raw_hash.strip()
-                if docling_hash is None and isinstance(parsed.metadata, dict):
+                        page_hash = raw_hash.strip()
+                if page_hash is None and isinstance(parsed.metadata, Mapping):
                     raw_hash = parsed.metadata.get("docling_hash")
                     if isinstance(raw_hash, str) and raw_hash.strip():
-                        docling_hash = raw_hash.strip()
-                if docling_hash:
-                    citation["docling_hash"] = docling_hash
-                if image_path or docling_hash:
-                    citation["image_url"] = (
-                        f"/ingestion/documents/{document_id}/pages/{page.number}/preview"
-                    )
+                        page_hash = raw_hash.strip()
+                if page_hash:
+                    citation["docling_hash"] = page_hash
+                if image_path or page_hash:
+                    citation["image_url"] = f"/ingestion/documents/{document_id}/pages/{page.number}/preview"
                 chunk_metadata["citation"] = citation
                 if job.parameters:
                     chunk_metadata["ingestion_parameters"] = job.parameters
@@ -766,28 +716,23 @@ class DocumentIngestionPipeline:
         if path.is_file() and self._is_supported(path):
             return [path]
         if path.is_dir():
-            return [p for p in path.rglob("*") if p.is_file() and self._is_supported(p)]
+            return [candidate for candidate in path.rglob("*") if candidate.is_file() and self._is_supported(candidate)]
         raise IngestionError(f"Source {source} does not exist")
 
     def _is_supported(self, path: Path) -> bool:
         return path.suffix.lower() in self.allowed_extensions
 
-    def _chunk_text(
-        self, text: str, *, chunk_size: int, chunk_overlap: int
-    ) -> list[tuple[str, int, int]]:
+    def _chunk_text(self, text: str, *, chunk_size: int, chunk_overlap: int) -> list[tuple[str, int, int]]:
         if not text:
             return []
-
         chunk_size = max(chunk_size, 1)
         chunk_overlap = max(chunk_overlap, 0)
         if chunk_overlap >= chunk_size:
             chunk_overlap = chunk_size - 1
         step = max(chunk_size - chunk_overlap, 1)
-
         chunks: list[tuple[str, int, int]] = []
         length = len(text)
         start = 0
-
         while start < length:
             end = min(start + chunk_size, length)
             chunk_text = text[start:end]
@@ -796,7 +741,6 @@ class DocumentIngestionPipeline:
             if end == length:
                 break
             start += step
-
         return chunks
 
 
