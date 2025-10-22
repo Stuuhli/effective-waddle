@@ -1,7 +1,7 @@
-# rag-platform
+# KiRa
 
 ## Overview
-The `rag-platform` service bundles authentication, retrieval-augmented chat, document ingestion, and
+The `KiRa` service bundles authentication, retrieval-augmented chat, document ingestion, and
 an administrative surface into a single FastAPI application.  Async SQLAlchemy models back the API, and
 vector retrieval can be delegated either to a standard Milvus-powered RAG flow or to the GraphRAG
 adapter that was ported from the legacy project.
@@ -11,11 +11,12 @@ Currently, the development is done in a WSL due to milvus only running on a linu
 
 ## Prerequisites
 - Python 3.11+
-- PostgreSQL 13+ reachable from the application
-- Docker for quick local development. Install it on the host system (Windows) and enable Settings → Resources → WSL Integration
+- Docker for quick local development. Install it on the host system (Windows) and make sure Settings → Resources → WSL Integration is enabled
+- Milvus for vector storage
+- Ollama or vLLM backend for LLM completions (installed to /usr/local)
 - Apptainer/Singularity if you plan to build the runtime container
-- (Optional) Milvus for vector storage
-- (Optional) Ollama or vLLM backend for LLM completions (installed to /usr/local)
+- PostgreSQL 13+ reachable from the application
+- (Optional) DBeaver for looking at the user DB
 - `pip-tools` for deterministic dependency management
 ```bash
 sudo apt update
@@ -34,7 +35,7 @@ pip install pip-tools
 ```
 
 ## 2. Install dependencies via pip-tools
-Dependencies are defined in layered `.in` files. Install the package you need.
+Dependencies are defined in layered `.in` files. Install the package you need. It is recommended to always be using the dev libraries while developing.
 
 ```bash
 pip-compile requirements/base.in --verbose
@@ -70,10 +71,6 @@ PY
 ```
 
 ### PostgreSQL configuration
-On HPC clusters (Slurm + Apptainer) you typically connect to an external PostgreSQL instance
-provisioned by your infrastructure team or a separate VM you control.  The application expects
-network access to that database; no container orchestration is required inside the Apptainer image.
-
 For local development you can still spin up PostgreSQL with Docker if desired:
 
 ```bash
@@ -95,6 +92,12 @@ After the initial container setup, you can simply start and stop it again using
 docker start rag-postgres
 docker stop rag-postgres
 ```
+<br> <br>
+
+
+>IMPORTANT NOTE: <br>For active development on an HPC, apptainer containers have to be built. These are currently not covered by this guide.
+
+<br>
 
 ## 4. Run database migrations
 Apply the latest schema using Alembic:
@@ -103,8 +106,10 @@ Apply the latest schema using Alembic:
 alembic upgrade head
 ```
 
-The Alembic environment reads the same settings module as the API, so make sure your `.env` file is
-in place before running migrations.
+The Alembic environment reads the same settings module as the API, so make sure your `.env` file is in place before running migrations.
+<br>
+When doing changes to the schema (which you should avoid doing), the above command has to be run again to account for these changes. Using DBeaver to inspect the changes is recommended.
+
 
 ## 5. Start the services
 ### API
@@ -112,20 +117,19 @@ in place before running migrations.
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Open <http://localhost:8000/docs> for the interactive OpenAPI explorer. Der Einstiegspunkt (`/`)
-leitet auf die Gradio-Oberfläche unter `/frontend/login` weiter. Dort meldest Du Dich per E-Mail und
-Passwort an; der Login ruft die FastAPI-Auth-Route auf und speichert das JWT im Gradio-State. Erst
-danach werden die Ingestion-Steuerelemente freigeschaltet.
+Open <http://localhost:8000/docs> for the interactive OpenAPI explorer. The entrypoint (`/`)
+leads to the frontend `/frontend/login`. 
+In the login page, you will have to authenticate yourself with a user. This triggers FastAPI-Auth-routes and generates JWT-Tokens, for which only one can be active per UID. Only after authentication, you can access the following routes.
 
 ### Seed sample data
-Um die Datenbank frisch aufzusetzen und einen initialen Admin-Benutzer inklusive aller Rollen zu
-erhalten, führe das Seed-Skript aus:
+When setting up the DB, you will have to run the seeding script to create a default admin. Otherwise, you won't be able to create other accounts, even through the openAPI endpoint:
 
 ```bash
 python scripts/seed_database.py
 ```
 
-Die Zugangsdaten kannst Du über die `bootstrap`-Sektion in `.env` bzw. `src/config.py` anpassen.
+To see the credentials, simply look under the `bootstrap` section in `.env` or or `src/config.py`. 
+
 
 ### Background worker
 The ingestion worker polls the database for new jobs and should be launched alongside the API when you
@@ -143,25 +147,7 @@ pytest tests -q
 The test harness provisions an async SQLite database in-memory, so PostgreSQL is not required when
 running the automated checks.
 
-## 7. Build & run with Apptainer
-The project is designed to run inside Apptainer containers on Slurm-managed HPC systems. A minimal
-workflow looks like this:
 
-1. Author a definition file (e.g. `rag-platform.def`) that starts from an official Python base image,
-   installs system dependencies (build tools, libpq, etc.), and copies the application with its
-   `requirements/prod.txt`.
-2. From your development machine (or a build node with Apptainer privileges), create the image:
-   ```bash
-   apptainer build rag-platform.sif rag-platform.def
-   ```
-3. Submit a Slurm job that:
-   - Exports environment variables (or binds a secrets file) for PostgreSQL, Milvus, LLM hosts, etc.
-   - Runs `apptainer exec rag-platform.sif uvicorn src.main:app --host 0.0.0.0 --port ${PORT}`.
-   - Optionally launches the ingestion worker in a companion job or step.
-
-The Apptainer image should remain lean: it should not contain a bundled PostgreSQL server. Instead,
-point the application to the managed database instance available in your cluster network. This mirrors
-production expectations and keeps storage concerns outside of the container runtime.
 
 ## Optional services
 - **Milvus**: Update `MILVUS__HOST`, `MILVUS__PORT`, and related settings to point to your vector
@@ -173,21 +159,5 @@ production expectations and keeps storage concerns outside of the container runt
 
 ## Project structure
 The FastAPI routers live under `src/`, and supporting infrastructure (database, repositories, vector
-stores, LLM clients) is namespaced under `src/infrastructure`. Tests sind in `tests/` zu finden. Die
-Gradio-Oberfläche wird in `src/frontend/gradio_app.py` definiert und beim App-Start unter
-`/frontend/login` eingebunden.
-
-## Troubleshooting
-- Verify the API can reach PostgreSQL using the DSN printed in the startup logs.
-- Ensure Alembic migrations ran successfully before creating users or ingestion jobs.
-- When optional dependencies (Milvus, GraphRAG, Ollama) are unavailable, the code falls back to safe
-  placeholders; enable them incrementally and update `.env` accordingly.
-
-
-localhost/docs
-
-{
-  "email": "admin@test.de",
-  "password": "administrator",
-  "full_name": "administrator"
-}
+stores, LLM clients) is namespaced under `src/infrastructure`. Tests can be found in `tests/`.
+The UI is defined under `src/frontend`.
