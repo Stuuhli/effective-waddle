@@ -1,5 +1,6 @@
 # Development lock source. Compile with `pip-compile requirements/dev.in`.
 -r base.in
+fastapi-voyager
 httpx
 pip-tools
 pytest

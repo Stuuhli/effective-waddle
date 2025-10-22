@@ -1,6 +1,8 @@
 """FastAPI application factory."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -17,6 +19,10 @@ from .ingestion.router import router as ingestion_router
 from .logging import setup_logging
 from .retrieval.router import router as retrieval_router
 
+try:
+    from fastapi_voyager import create_voyager
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    create_voyager = None  # type: ignore[assignment]
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
@@ -67,6 +73,15 @@ def create_app() -> FastAPI:
 
     app.mount("/frontend/static", StaticFiles(directory=STATIC_DIR), name="frontend_static")
     app.include_router(login_router, prefix="/frontend", tags=["frontend"])
+
+    if settings.fastapi.enable_voyager:
+        if create_voyager is None:
+            logging.warning(
+                "FastAPI Voyager requested via settings.fastapi.enable_voyager, but fastapi-voyager is not installed.",
+            )
+        else:
+            voyager_app = create_voyager(app, module_prefix="src")
+            app.mount("/frontend/voyager", voyager_app)
 
     async def redirect_to_frontend() -> RedirectResponse:
         return RedirectResponse(url="/frontend/login", status_code=307)

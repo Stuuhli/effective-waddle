@@ -27,6 +27,7 @@ class FastAPISettings(BaseModel):
     access_token_expire_minutes: int = 30
     refresh_token_expire_minutes: int = 60 * 24 * 7
     token_algorithm: str = "HS256"
+    enable_voyager: bool = True
 
 
 class PostgresSettings(BaseModel):
