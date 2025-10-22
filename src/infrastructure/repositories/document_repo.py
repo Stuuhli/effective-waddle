@@ -128,7 +128,10 @@ class DocumentRepository(AsyncRepository[Document]):
         self.session.add(job)
         await self.session.flush()
         await self.session.refresh(job)
-        await self.session.refresh(job, attribute_names=["collection"])
+        try:
+            await self.session.refresh(job, attribute_names=["collection"])
+        except TypeError:
+            await self.session.refresh(job)
         return job
 
     async def update_job_status(

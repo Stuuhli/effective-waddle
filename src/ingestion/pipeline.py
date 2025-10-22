@@ -24,7 +24,7 @@ SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".json"}
 
 _DATA_URI_RE = re.compile(r"data:image/[\w.+-]+;base64,[A-Za-z0-9+/=\s]+")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(data:image/[^)]+\)")
-_HTML_IMAGE_RE = re.compile(r"<img\\b[^>]*src=\"data:image/[^\"]+\"[^>]*>", re.IGNORECASE)
+_HTML_IMAGE_RE = re.compile(r"<img\b[^>]*src=(?:\"|')data:image/[^\"']+(?:\"|')[^>]*>", re.IGNORECASE)
 _MAX_WORD_CHARS = 4096
 
 def _normalise_value(value: Any) -> object:
