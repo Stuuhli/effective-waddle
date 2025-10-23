@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
 
 import httpx
@@ -13,6 +14,12 @@ import httpx
 from .base import EMBEDDING_DIMENSION, EmbeddingClient
 
 LOGGER = logging.getLogger(__name__)
+
+# fallback for failed import, which was annoying within the IDE
+if TYPE_CHECKING:  # pragma: no cover - for static analysis only
+    from ollama import AsyncClient  # noqa: F401
+else:
+    AsyncClient = Any
 
 
 def _normalise_dimension(vector: Sequence[float], dimension: int) -> list[float]:
@@ -49,12 +56,12 @@ class OllamaEmbeddingClient(EmbeddingClient):
         self._timeout = request_timeout
         self._dimension = dimension
         self._binary_path = binary_path
-        self._client: "AsyncClient | None" = None
+        self._client: AsyncClient | None = None
         self._server_lock: asyncio.Lock | None = None
         self._server_running = False
         self._server_process: subprocess.Popen[bytes] | None = None
 
-    async def _ensure_client(self) -> "AsyncClient":
+    async def _ensure_client(self) -> AsyncClient:
         await self._ensure_server_running()
         if self._client is not None:
             return self._client
