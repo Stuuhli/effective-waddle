@@ -172,15 +172,40 @@ class DocumentRepository(AsyncRepository[Document]):
         await self.session.refresh(collection)
         return collection
 
+    async def create_collection(self, name: str, description: str | None = None) -> Collection:
+        collection = Collection(name=name, description=description)
+        self.session.add(collection)
+        await self.session.flush()
+        await self.session.refresh(collection)
+        return collection
+
     async def assign_collection_to_role(self, collection: Collection, role: Role) -> None:
         if role in collection.roles:
             return
         collection.roles.append(role)
         await self.session.flush()
 
+    async def set_collection_roles(self, collection: Collection, roles: Sequence[Role]) -> None:
+        collection.roles = list(roles)
+        await self.session.flush()
+
     async def get_collection_by_name(self, name: str) -> Optional[Collection]:
         result = await self.session.execute(select(Collection).where(Collection.name == name))
         return result.scalar_one_or_none()
+
+    async def get_collection(self, collection_id: str) -> Optional[Collection]:
+        stmt = (
+            select(Collection)
+            .options(selectinload(Collection.roles))
+            .where(Collection.id == collection_id)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_all_collections(self) -> list[Collection]:
+        stmt = select(Collection).options(selectinload(Collection.roles)).order_by(Collection.name)
+        result = await self.session.execute(stmt)
+        return list(result.scalars())
 
     async def list_collections_for_roles(self, roles: list[Role]) -> list[Collection]:
         if not roles:

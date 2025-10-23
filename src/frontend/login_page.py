@@ -108,6 +108,8 @@ async def ingestion_page(
 async def admin_page(request: Request, user: User = Depends(_current_user_from_cookie)) -> HTMLResponse:
     """Render a placeholder admin dashboard."""
     is_admin = any(role.name == "admin" for role in user.roles)
+    if not is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     context = {
         "request": request,
         "is_admin": is_admin,
