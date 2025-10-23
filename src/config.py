@@ -51,7 +51,7 @@ class LLMSettings(BaseModel):
     provider: Literal["ollama", "vllm"] = "ollama"
     ollama_host: str = "http://localhost:11434"
     ollama_binary: str = "/usr/local/bin/ollama"
-    ollama_model: str = "qwen3:4b"
+    ollama_model: str = "qwen3:1.7b"
     embedding_model: str = "qwen3-embedding:0.6b"
     vllm_host: str = "http://localhost:8000"
     vllm_model: str = "qwen3:12b"

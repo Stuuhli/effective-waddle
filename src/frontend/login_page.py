@@ -13,6 +13,8 @@ from ..infrastructure.database import IngestionJob, User
 from ..config import load_settings
 from ..ingestion.dependencies import get_ingestion_service
 from ..ingestion.service import IngestionService
+from ..retrieval.dependencies import get_retrieval_service
+from ..retrieval.service import RetrievalService
 
 
 async def _current_user_from_cookie(
@@ -44,17 +46,18 @@ async def login_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("login.html", {"request": request})
 
 @router.get("/chat", response_class=HTMLResponse, include_in_schema=False)
-async def chat_page(request: Request, user: User = Depends(_current_user_from_cookie)) -> HTMLResponse:
-    """Render the chat workspace with placeholder data."""
+async def chat_page(
+    request: Request,
+    user: User = Depends(_current_user_from_cookie),
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+) -> HTMLResponse:
+    """Render the chat workspace with persisted conversations."""
     is_admin = any(role.name == "admin" for role in user.roles)
+    conversations = await retrieval_service.list_sessions(user.id)
     context = {
         "request": request,
         "is_admin": is_admin,
-        "conversations": [
-            {"id": "conv-1", "title": "Welcome Tour", "updated_at": "Just now"},
-            {"id": "conv-2", "title": "Product Brainstorm", "updated_at": "2 hours ago"},
-            {"id": "conv-3", "title": "Research Notes", "updated_at": "Yesterday"},
-        ],
+        "conversations": conversations,
     }
     return templates.TemplateResponse("chat.html", context)
 

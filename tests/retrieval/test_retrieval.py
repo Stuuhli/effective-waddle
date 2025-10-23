@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
@@ -12,6 +13,7 @@ from src.infrastructure.repositories.conversation_repo import ConversationReposi
 from src.infrastructure.repositories.user_repo import UserRepository
 from src.retrieval.dependencies import get_retrieval_service
 from src.retrieval.service import RetrievalService
+from src.retrieval.stream import StreamEvent
 from src.retrieval.strategies.base import RetrievalContext, RetrievalStrategy
 
 
@@ -22,9 +24,11 @@ class RecordingStrategy(RetrievalStrategy):
         self.label = label
         self.calls: list[RetrievalContext] = []
 
-    async def run(self, context: RetrievalContext) -> AsyncGenerator[str, None]:
+    async def run(self, context: RetrievalContext) -> AsyncGenerator[StreamEvent, None]:
         self.calls.append(context)
-        yield f"{self.label}:{context.query}"
+        yield StreamEvent.status(stage="retrieving", message="retrieving")
+        yield StreamEvent.token(text=f"{self.label}:{context.query}")
+        yield StreamEvent.done()
 
 
 def _install_retrieval_override(
@@ -72,11 +76,15 @@ def test_default_role_uses_rag_strategy(app: FastAPI, session_factory: async_ses
                     headers=headers,
                 )
                 assert message_response.status_code == 200
-                chunks: list[str] = []
-                async for piece in message_response.aiter_text():
-                    chunks.append(piece)
-                body = "".join(chunks)
-                assert body.startswith("rag:")
+                tokens: list[str] = []
+                async for line in message_response.aiter_lines():
+                    data = line.strip()
+                    if not data:
+                        continue
+                    event = json.loads(data)
+                    if event.get("type") == "token":
+                        tokens.append(event.get("text", ""))
+                assert "".join(tokens).startswith("rag:")
                 assert len(rag_strategy.calls) == 1
                 assert not graphrag_strategy.calls
 
@@ -125,11 +133,15 @@ def test_graphrag_role_triggers_graphrag_strategy(
                     headers=headers,
                 )
                 assert message_response.status_code == 200
-                chunks: list[str] = []
-                async for piece in message_response.aiter_text():
-                    chunks.append(piece)
-                body = "".join(chunks)
-                assert body.startswith("graphrag:")
+                tokens: list[str] = []
+                async for line in message_response.aiter_lines():
+                    data = line.strip()
+                    if not data:
+                        continue
+                    event = json.loads(data)
+                    if event.get("type") == "token":
+                        tokens.append(event.get("text", ""))
+                assert "".join(tokens).startswith("graphrag:")
                 assert not rag_strategy.calls
                 assert len(graphrag_strategy.calls) == 1
 
