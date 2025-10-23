@@ -400,12 +400,6 @@ body.chat-fullscreen {
   font-size: 0.85rem;
 }
 
-.status-pill--error {
-  border-color: rgba(255, 107, 129, 0.7);
-  color: rgba(255, 214, 220, 0.96);
-  background: rgba(255, 107, 129, 0.18);
-}
-
 .chat-window {
   flex: 1;
   overflow-y: auto;
