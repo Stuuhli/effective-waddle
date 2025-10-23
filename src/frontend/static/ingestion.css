@@ -481,34 +481,10 @@ body {
   border-bottom: none;
 }
 
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.35rem 0.75rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+
+.job-status .status-pill {
   font-size: 0.75rem;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.status-pill--completed {
-  border-color: rgba(77, 208, 181, 0.55);
-  background: rgba(77, 208, 181, 0.18);
-  color: rgba(210, 255, 245, 0.95);
-}
-
-.status-pill--processing {
-  border-color: rgba(251, 191, 36, 0.55);
-  background: rgba(251, 191, 36, 0.18);
-  color: rgba(255, 235, 182, 0.95);
-}
-
-.status-pill--failed {
-  border-color: rgba(255, 107, 129, 0.55);
-  background: rgba(255, 107, 129, 0.18);
-  color: rgba(255, 214, 221, 0.95);
 }
 
 .icon {
