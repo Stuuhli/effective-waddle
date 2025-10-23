@@ -1,0 +1,66 @@
+:root {
+  --status-pill-border: rgba(255, 255, 255, 0.18);
+  --status-pill-bg: rgba(255, 255, 255, 0.08);
+  --status-pill-text: rgba(255, 255, 255, 0.75);
+  --status-pill-success-border: rgba(77, 208, 181, 0.55);
+  --status-pill-success-bg: rgba(77, 208, 181, 0.18);
+  --status-pill-success-text: rgba(210, 255, 245, 0.95);
+  --status-pill-warning-border: rgba(251, 191, 36, 0.55);
+  --status-pill-warning-bg: rgba(251, 191, 36, 0.18);
+  --status-pill-warning-text: rgba(255, 235, 182, 0.95);
+  --status-pill-error-border: rgba(255, 107, 129, 0.55);
+  --status-pill-error-bg: rgba(255, 107, 129, 0.18);
+  --status-pill-error-text: rgba(255, 214, 221, 0.95);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--status-pill-border);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--status-pill-text);
+  background: var(--status-pill-bg);
+  transition: border-color 200ms ease, color 200ms ease, background 200ms ease;
+}
+
+.status-pill--idle,
+.status-pill--pending {
+  opacity: 0.85;
+}
+
+.status-pill--streaming,
+.status-pill--success {
+  border-color: var(--status-pill-success-border);
+  background: var(--status-pill-success-bg);
+  color: var(--status-pill-success-text);
+}
+
+.status-pill--running,
+.status-pill--warning {
+  border-color: var(--status-pill-warning-border);
+  background: var(--status-pill-warning-bg);
+  color: var(--status-pill-warning-text);
+}
+
+.status-pill--failed,
+.status-pill--error {
+  border-color: var(--status-pill-error-border);
+  background: var(--status-pill-error-bg);
+  color: var(--status-pill-error-text);
+}

@@ -1,21 +1,12 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RAG Platform – Chat</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      rel="stylesheet"
-      href="{{ url_for('frontend_static', path='chat.css') }}"
-    />
-  </head>
-  <body data-admin="{{ 'true' if is_admin else 'false' }}">
+{% extends "base.html" %}
+
+{% block title %}RAG Platform – Chat{% endblock %}
+
+{% block styles %}
+    <link rel="stylesheet" href="{{ url_for('frontend_static', path='chat.css') }}" />
+{% endblock %}
+
+{% block body %}
     <div class="chat-layout chat-layout--sidebar-open" id="chat-layout">
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__header">
@@ -100,142 +91,8 @@
         </form>
       </div>
     </div>
+{% endblock %}
 
-    <script>
-      const layout = document.getElementById('chat-layout');
-      const sidebar = document.getElementById('sidebar');
-      const sidebarOpen = document.getElementById('sidebar-open');
-      const sidebarClose = document.getElementById('sidebar-close');
-      const adminLinks = document.getElementById('admin-links');
-      const chatWindow = document.getElementById('chat-window');
-      const chatForm = document.getElementById('chat-form');
-      const chatInput = document.getElementById('chat-input');
-      const streamStatus = document.getElementById('stream-status');
-      const stopStreamButton = document.getElementById('stop-stream');
-      const sendButton = document.getElementById('send-button');
-      const conversationList = document.getElementById('conversation-list');
-
-      const cookieValue = document.cookie.split('; ').find((row) => row.startsWith('rag_admin='));
-      const adminFlag = cookieValue ? cookieValue.split('=')[1] === '1' : document.body.dataset.admin === 'true';
-      if (!adminFlag && adminLinks) {
-        adminLinks.hidden = true;
-      }
-
-      function openSidebar() {
-        layout.classList.add('chat-layout--sidebar-open');
-        layout.classList.remove('chat-layout--sidebar-hidden');
-      }
-
-      function closeSidebar() {
-        layout.classList.add('chat-layout--sidebar-hidden');
-        layout.classList.remove('chat-layout--sidebar-open');
-      }
-
-      sidebarOpen?.addEventListener('click', () => {
-        const isHidden = layout.classList.contains('chat-layout--sidebar-hidden');
-        if (isHidden) {
-          openSidebar();
-        } else {
-          closeSidebar();
-        }
-      });
-
-      sidebarClose?.addEventListener('click', closeSidebar);
-
-      let streamingInterval = null;
-      let streamBuffer = [];
-
-      function setStreamingState(state) {
-        streamStatus.textContent = state === 'streaming' ? 'Streaming…' : state === 'stopped' ? 'Stopped' : 'Idle';
-        streamStatus.classList.toggle('status-pill--streaming', state === 'streaming');
-        streamStatus.classList.toggle('status-pill--idle', state !== 'streaming');
-        stopStreamButton.disabled = state !== 'streaming';
-        sendButton.disabled = state === 'streaming';
-      }
-
-      function appendMessage(type, text) {
-        const message = document.createElement('div');
-        message.className = `message message--${type}`;
-        const author = document.createElement('span');
-        author.className = 'message__author';
-        author.textContent = type === 'user' ? 'You' : type === 'assistant' ? 'Assistant' : 'System';
-        const body = document.createElement('p');
-        body.className = 'message__content';
-        body.textContent = text;
-        message.append(author, body);
-        chatWindow.appendChild(message);
-        chatWindow.scrollTop = chatWindow.scrollHeight;
-        return message;
-      }
-
-      function startMockStreaming(container) {
-        const placeholderTokens = [
-          'Generating response',
-          'Streaming chunk 1',
-          'Streaming chunk 2',
-          'Finalizing output',
-        ];
-        streamBuffer = [...placeholderTokens];
-        setStreamingState('streaming');
-
-        streamingInterval = window.setInterval(() => {
-          const token = streamBuffer.shift();
-          if (!token) {
-            stopStreaming('idle');
-            container.querySelector('.message__content').textContent = 'Streaming skeleton complete. Integrate LLM output here.';
-            return;
-          }
-          container.querySelector('.message__content').textContent = token;
-        }, 1200);
-      }
-
-      function stopStreaming(nextState = 'stopped') {
-        if (streamingInterval) {
-          window.clearInterval(streamingInterval);
-          streamingInterval = null;
-        }
-        setStreamingState(nextState);
-      }
-
-      chatForm.addEventListener('submit', (event) => {
-        event.preventDefault();
-        const value = chatInput.value.trim();
-        if (!value) {
-          return;
-        }
-        appendMessage('user', value);
-        chatInput.value = '';
-        const assistant = appendMessage('assistant', 'Preparing to stream…');
-        startMockStreaming(assistant);
-      });
-
-      stopStreamButton.addEventListener('click', () => {
-        stopStreaming();
-        const lastAssistant = [...chatWindow.querySelectorAll('.message--assistant')].pop();
-        if (lastAssistant) {
-          lastAssistant.querySelector('.message__content').textContent += ' (stream stopped)';
-        }
-      });
-
-      conversationList?.addEventListener('click', (event) => {
-        const button = event.target.closest('button[data-id]');
-        if (!button) {
-          return;
-        }
-        Array.from(conversationList.querySelectorAll('.conversation-list__button--active')).forEach((active) =>
-          active.classList.remove('conversation-list__button--active'),
-        );
-        button.classList.add('conversation-list__button--active');
-        appendMessage('system', `Loaded conversation "${button.querySelector('.conversation-list__title').textContent}".`);
-
-        closeSidebar();
-      });
-
-      document.getElementById('new-conversation')?.addEventListener('click', () => {
-        appendMessage('system', 'New conversation started. Streaming responses will appear here.');
-      });
-
-      setStreamingState('idle');
-    </script>
-  </body>
-</html>
+{% block scripts %}
+    <script defer src="{{ url_for('frontend_static', path='chat.js') }}"></script>
+{% endblock %}
