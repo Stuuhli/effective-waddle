@@ -4,8 +4,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Iterable, Protocol
+from typing import Iterable
 
+from ..stream import StreamEvent
 
 @dataclass
 class RetrievalContext:
@@ -21,8 +22,8 @@ class RetrievalStrategy(ABC):
     """Interface for retrieval strategies."""
 
     @abstractmethod
-    async def run(self, context: RetrievalContext) -> AsyncGenerator[str, None]:
-        """Return a streaming generator of response chunks."""
+    async def run(self, context: RetrievalContext) -> AsyncGenerator[StreamEvent, None]:
+        """Return a streaming generator of response events."""
 
 
 __all__ = ["RetrievalStrategy", "RetrievalContext"]
