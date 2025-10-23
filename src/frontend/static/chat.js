@@ -9,8 +9,7 @@
     }
 
     const layout = document.getElementById('chat-layout');
-    const sidebarOpen = document.getElementById('sidebar-open');
-    const sidebarClose = document.getElementById('sidebar-close');
+    const sidebarToggleButton = document.getElementById('sidebar-open');
     const adminLinks = document.getElementById('admin-links');
     const chatWindow = document.getElementById('chat-window');
     const chatForm = document.getElementById('chat-form');
@@ -20,6 +19,11 @@
     const sendButton = document.getElementById('send-button');
     const conversationList = document.getElementById('conversation-list');
     const newConversationButton = document.getElementById('new-conversation');
+
+    const fullscreenToggle = document.getElementById('fullscreen-toggle');
+    const fullscreenEnterIcon = fullscreenToggle?.querySelector('.fullscreen-toggle__icon--enter');
+    const fullscreenExitIcon = fullscreenToggle?.querySelector('.fullscreen-toggle__icon--exit');
+    const sidebarToggleIcon = document.getElementById('sidebar-toggle-icon');
 
     if (!layout || !chatForm || !chatWindow || !chatInput || !streamStatus) {
       console.error('Chat workspace markup is incomplete; aborting initialisation.');
@@ -31,17 +35,75 @@
       adminLinks.hidden = true;
     }
 
+    const SIDEBAR_OPEN_SVG =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" width="24" height="24" fill="#eeeeef"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg>';
+    const SIDEBAR_CLOSED_SVG =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" width="24" height="24" fill="#eeeeef"><path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/></svg>';
+
+    let isFullscreen = false;
+    let sidebarWasOpen = !layout.classList.contains('chat-layout--sidebar-hidden');
+
+    function setSidebarToggleState(isOpen) {
+      sidebarToggleButton?.setAttribute('aria-pressed', String(isOpen));
+      if (sidebarToggleIcon) {
+        sidebarToggleIcon.innerHTML = isOpen ? SIDEBAR_OPEN_SVG : SIDEBAR_CLOSED_SVG;
+      }
+    }
+
+    function updateFullscreenToggle(enabled) {
+      if (!fullscreenToggle) {
+        return;
+      }
+      fullscreenToggle.setAttribute('aria-pressed', String(enabled));
+      fullscreenToggle.setAttribute('aria-label', enabled ? 'Exit fullscreen' : 'Enter fullscreen');
+      if (fullscreenEnterIcon) {
+        fullscreenEnterIcon.hidden = enabled;
+      }
+      if (fullscreenExitIcon) {
+        fullscreenExitIcon.hidden = !enabled;
+      }
+    }
+
     function openSidebar() {
       layout.classList.add('chat-layout--sidebar-open');
       layout.classList.remove('chat-layout--sidebar-hidden');
+      sidebarWasOpen = true;
+      setSidebarToggleState(true);
     }
 
     function closeSidebar() {
       layout.classList.add('chat-layout--sidebar-hidden');
       layout.classList.remove('chat-layout--sidebar-open');
+      sidebarWasOpen = false;
+      setSidebarToggleState(false);
     }
 
-    sidebarOpen?.addEventListener('click', () => {
+    function enterFullscreen() {
+      isFullscreen = true;
+      sidebarWasOpen = !layout.classList.contains('chat-layout--sidebar-hidden');
+      document.body.classList.add('chat-fullscreen');
+      layout.classList.add('chat-layout--fullscreen');
+      if (sidebarWasOpen) {
+        openSidebar();
+      } else {
+        closeSidebar();
+      }
+      updateFullscreenToggle(true);
+    }
+
+    function exitFullscreen() {
+      isFullscreen = false;
+      document.body.classList.remove('chat-fullscreen');
+      layout.classList.remove('chat-layout--fullscreen');
+      if (sidebarWasOpen) {
+        openSidebar();
+      } else {
+        closeSidebar();
+      }
+      updateFullscreenToggle(false);
+    }
+
+    sidebarToggleButton?.addEventListener('click', () => {
       const isHidden = layout.classList.contains('chat-layout--sidebar-hidden');
       if (isHidden) {
         openSidebar();
@@ -50,7 +112,13 @@
       }
     });
 
-    sidebarClose?.addEventListener('click', closeSidebar);
+    fullscreenToggle?.addEventListener('click', () => {
+      if (isFullscreen) {
+        exitFullscreen();
+      } else {
+        enterFullscreen();
+      }
+    });
 
     let streamingInterval = null;
     let streamBuffer = [];
@@ -163,6 +231,8 @@
       appendMessage('system', 'New conversation started. Streaming responses will appear here.');
     });
 
+    setSidebarToggleState(!layout.classList.contains('chat-layout--sidebar-hidden'));
+    updateFullscreenToggle(layout.classList.contains('chat-layout--fullscreen'));
     setStreamingState('idle');
   }
 
