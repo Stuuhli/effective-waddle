@@ -1,7 +1,7 @@
 """Admin API routes."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from .dependencies import admin_required, get_admin_service
 from .schemas import (
@@ -14,6 +14,7 @@ from .schemas import (
     RoleResponse,
     UserAdminResponse,
     UserRoleUpdate,
+    UserStatusUpdate,
 )
 from .service import AdminService
 
@@ -71,6 +72,27 @@ async def replace_user_roles(
     )
 
 
+@router.patch("/users/{user_id}/status", response_model=UserAdminResponse)
+async def update_user_status(
+    user_id: str,
+    payload: UserStatusUpdate,
+    service: AdminService = Depends(get_admin_service),
+) -> UserAdminResponse:
+    user = await service.update_user_status(user_id, payload.is_active)
+    return UserAdminResponse(
+        id=user.id,
+        email=user.email,
+        roles=[role.name for role in user.roles],
+        is_active=user.is_active,
+    )
+
+
+@router.delete("/users/{user_id}", status_code=204)
+async def delete_user(user_id: str, service: AdminService = Depends(get_admin_service)) -> Response:
+    await service.delete_user(user_id)
+    return Response(status_code=204)
+
+
 @router.post("/feature-flags/graphrag", response_model=UserAdminResponse)
 async def update_graphrag_flag(
     payload: FeatureFlagUpdate,
@@ -105,6 +127,14 @@ async def update_collection_roles(
     service: AdminService = Depends(get_admin_service),
 ) -> CollectionAdminResponse:
     return await service.update_collection_roles(collection_id, payload)
+
+
+@router.delete("/collections/{collection_id}", status_code=204)
+async def delete_collection(
+    collection_id: str, service: AdminService = Depends(get_admin_service)
+) -> Response:
+    await service.delete_collection(collection_id)
+    return Response(status_code=204)
 
 
 __all__ = ["router"]

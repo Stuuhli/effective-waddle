@@ -8,7 +8,7 @@ import jwt
 from fastapi import HTTPException, status
 
 from ..config import Settings
-from ..infrastructure.database import User
+from ..infrastructure.database import RoleCategory, User
 from ..infrastructure.repositories.user_repo import UserRepository
 from .constants import (
     ACCESS_TOKEN_TYPE,
@@ -69,7 +69,9 @@ class AuthService:
         if existing:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
         hashed = self._hash_password(payload.password)
-        default_role = await self.user_repo.ensure_role(DEFAULT_ROLE_NAME, DEFAULT_ROLE_DESCRIPTION)
+        default_role = await self.user_repo.ensure_role(
+            DEFAULT_ROLE_NAME, DEFAULT_ROLE_DESCRIPTION, RoleCategory.permission
+        )
         user = await self.user_repo.create_user(
             email=payload.email,
             hashed_password=hashed,

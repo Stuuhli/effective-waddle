@@ -24,15 +24,15 @@ from src.auth.constants import (
     RAG_ROLE_NAME,
 )
 from src.config import load_settings
-from src.infrastructure.database import Base, configure_engine, get_engine
+from src.infrastructure.database import Base, RoleCategory, configure_engine, get_engine
 from src.infrastructure.repositories.user_repo import UserRepository
 from src.infrastructure.repositories.document_repo import DocumentRepository
 
-ROLE_DESCRIPTIONS: Dict[str, str] = {
-    DEFAULT_ROLE_NAME: DEFAULT_ROLE_DESCRIPTION,
-    ADMIN_ROLE_NAME: ADMIN_ROLE_DESCRIPTION,
-    RAG_ROLE_NAME: RAG_ROLE_DESCRIPTION,
-    GRAPH_RAG_ROLE_NAME: GRAPH_RAG_ROLE_DESCRIPTION,
+ROLE_DESCRIPTIONS: Dict[str, tuple[str, RoleCategory]] = {
+    DEFAULT_ROLE_NAME: (DEFAULT_ROLE_DESCRIPTION, RoleCategory.permission),
+    ADMIN_ROLE_NAME: (ADMIN_ROLE_DESCRIPTION, RoleCategory.permission),
+    RAG_ROLE_NAME: (RAG_ROLE_DESCRIPTION, RoleCategory.permission),
+    GRAPH_RAG_ROLE_NAME: (GRAPH_RAG_ROLE_DESCRIPTION, RoleCategory.permission),
 }
 
 
@@ -59,9 +59,12 @@ async def seed_admin() -> None:
         document_repo = DocumentRepository(session)
 
         roles = {
-            name: await user_repo.ensure_role(name, description)
-            for name, description in ROLE_DESCRIPTIONS.items()
+            name: await user_repo.ensure_role(name, description, category)
+            for name, (description, category) in ROLE_DESCRIPTIONS.items()
         }
+        compliance_workspace = await user_repo.ensure_role(
+            "compliance", "Default compliance workspace", RoleCategory.workspace
+        )
 
         admin_capability = settings.bootstrap.admin_capability
         if admin_capability not in (RAG_ROLE_NAME, GRAPH_RAG_ROLE_NAME):
@@ -73,14 +76,14 @@ async def seed_admin() -> None:
         compliance_collection = await document_repo.ensure_collection(
             "compliance", "Compliance document collection"
         )
-        await document_repo.assign_collection_to_role(compliance_collection, roles[ADMIN_ROLE_NAME])
+        await document_repo.assign_collection_to_role(compliance_collection, compliance_workspace)
 
         password_hash = password_helper.hash(settings.bootstrap.admin_password)
         await user_repo.create_user(
             email=settings.bootstrap.admin_email,
             hashed_password=password_hash,
             full_name=settings.bootstrap.admin_full_name,
-            roles=[roles[ADMIN_ROLE_NAME], roles[admin_capability]],
+            roles=[roles[ADMIN_ROLE_NAME], roles[admin_capability], compliance_workspace],
             is_active=True,
             is_superuser=True,
             is_verified=True,

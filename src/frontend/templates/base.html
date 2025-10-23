@@ -13,7 +13,11 @@
     <link rel="stylesheet" href="{{ url_for('frontend_static', path='base.css') }}" />
     {% block styles %}{% endblock %}
   </head>
-  <body data-admin="{{ 'true' if (is_admin | default(false)) else 'false' }}">
+  <body
+    data-admin="{{ 'true' if (is_admin | default(false)) else 'false' }}"
+    data-user-id="{{ current_user_id | default('') }}"
+    data-user-email="{{ current_user_email | default('') }}"
+  >
     {% block body %}{% endblock %}
     <script defer src="{{ url_for('frontend_static', path='shared.js') }}"></script>
     {% block scripts %}{% endblock %}

@@ -10,7 +10,7 @@ from fastapi_users_db_sqlalchemy import SQLAlchemyUserDatabase
 
 from ..config import Settings
 from ..dependencies import get_db_session, get_settings
-from ..infrastructure.database import User
+from ..infrastructure.database import RoleCategory, User
 from ..infrastructure.repositories.user_repo import UserRepository
 from .constants import (
     DEFAULT_ROLE_DESCRIPTION,
@@ -44,8 +44,12 @@ class UserManager(BaseUserManager[User, str]):
         """Ensure new users receive the default role."""
 
         repo = UserRepository(self.user_db.session)
-        default_role = await repo.ensure_role(DEFAULT_ROLE_NAME, DEFAULT_ROLE_DESCRIPTION)
-        rag_role = await repo.ensure_role(RAG_ROLE_NAME, RAG_ROLE_DESCRIPTION)
+        default_role = await repo.ensure_role(
+            DEFAULT_ROLE_NAME, DEFAULT_ROLE_DESCRIPTION, RoleCategory.permission
+        )
+        rag_role = await repo.ensure_role(
+            RAG_ROLE_NAME, RAG_ROLE_DESCRIPTION, RoleCategory.permission
+        )
         await repo.assign_role(user, default_role)
         await repo.assign_role(user, rag_role)
         await self.user_db.session.refresh(user)

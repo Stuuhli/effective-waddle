@@ -29,6 +29,7 @@ from .frontend import STATIC_DIR, login_router
 from .ingestion.router import router as ingestion_router
 from .logging import setup_logging
 from .retrieval.router import router as retrieval_router
+from .infrastructure.database import RoleCategory
 from .infrastructure.repositories.document_repo import DocumentRepository
 from .infrastructure.repositories.user_repo import UserRepository
 
@@ -112,16 +113,35 @@ def create_app() -> FastAPI:
             document_repo = DocumentRepository(session)
 
             roles = {
-                DEFAULT_ROLE_NAME: await user_repo.ensure_role(DEFAULT_ROLE_NAME, DEFAULT_ROLE_DESCRIPTION),
-                ADMIN_ROLE_NAME: await user_repo.ensure_role(ADMIN_ROLE_NAME, ADMIN_ROLE_DESCRIPTION),
-                RAG_ROLE_NAME: await user_repo.ensure_role(RAG_ROLE_NAME, RAG_ROLE_DESCRIPTION),
-                GRAPH_RAG_ROLE_NAME: await user_repo.ensure_role(GRAPH_RAG_ROLE_NAME, GRAPH_RAG_ROLE_DESCRIPTION),
+                DEFAULT_ROLE_NAME: await user_repo.ensure_role(
+                    DEFAULT_ROLE_NAME,
+                    DEFAULT_ROLE_DESCRIPTION,
+                    RoleCategory.permission,
+                ),
+                ADMIN_ROLE_NAME: await user_repo.ensure_role(
+                    ADMIN_ROLE_NAME,
+                    ADMIN_ROLE_DESCRIPTION,
+                    RoleCategory.permission,
+                ),
+                RAG_ROLE_NAME: await user_repo.ensure_role(
+                    RAG_ROLE_NAME,
+                    RAG_ROLE_DESCRIPTION,
+                    RoleCategory.permission,
+                ),
+                GRAPH_RAG_ROLE_NAME: await user_repo.ensure_role(
+                    GRAPH_RAG_ROLE_NAME,
+                    GRAPH_RAG_ROLE_DESCRIPTION,
+                    RoleCategory.permission,
+                ),
             }
+            compliance_workspace = await user_repo.ensure_role(
+                "compliance", "Default compliance workspace", RoleCategory.workspace
+            )
 
             compliance = await document_repo.ensure_collection(
                 "compliance", "Compliance document collection"
             )
-            await document_repo.assign_collection_to_role(compliance, roles[ADMIN_ROLE_NAME])
+            await document_repo.assign_collection_to_role(compliance, compliance_workspace)
             await session.commit()
 
             admin_email = settings.bootstrap.admin_email
@@ -144,7 +164,7 @@ def create_app() -> FastAPI:
                 email=admin_email,
                 hashed_password=hashed_password,
                 full_name=settings.bootstrap.admin_full_name,
-                roles=[roles[ADMIN_ROLE_NAME], roles[capability]],
+                roles=[roles[ADMIN_ROLE_NAME], roles[capability], compliance_workspace],
                 is_active=True,
                 is_superuser=True,
                 is_verified=True,

@@ -33,5 +33,35 @@
     };
   }
 
-  global.FrontendUtils = Object.freeze({ getCookie, isAdmin, withAuth });
+  function clearAuthCookies() {
+    const cookies = ['rag_token', 'rag_refresh', 'rag_admin'];
+    cookies.forEach((name) => {
+      document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax;`;
+    });
+  }
+
+  function redirectToLogin() {
+    clearAuthCookies();
+    window.location.assign('/frontend/login');
+  }
+
+  function currentUser() {
+    const body = document.body;
+    if (!body) {
+      return { id: '', email: '' };
+    }
+    return {
+      id: body.dataset.userId || '',
+      email: body.dataset.userEmail || '',
+    };
+  }
+
+  global.FrontendUtils = Object.freeze({
+    getCookie,
+    isAdmin,
+    withAuth,
+    clearAuthCookies,
+    redirectToLogin,
+    currentUser,
+  });
 })(window);
