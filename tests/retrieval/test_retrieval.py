@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from src.infrastructure.database import RoleCategory
 from src.infrastructure.repositories.conversation_repo import ConversationRepository
 from src.infrastructure.repositories.user_repo import UserRepository
 from src.retrieval.dependencies import get_retrieval_service
@@ -120,7 +121,9 @@ def test_graphrag_role_triggers_graphrag_strategy(
                     user_repo = UserRepository(session)
                     user = await user_repo.get_by_email(payload["email"])
                     assert user is not None
-                    graph_role = await user_repo.ensure_role("graphrag", "GraphRAG access")
+                    graph_role = await user_repo.ensure_role(
+                        "graphrag", "GraphRAG access", RoleCategory.permission
+                    )
                     await user_repo.assign_role(user, graph_role)
 
                 session_response = await client.post("/chat/sessions", json={"title": "Dana Session"}, headers=headers)

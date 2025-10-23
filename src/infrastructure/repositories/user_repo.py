@@ -6,7 +6,7 @@ from typing import Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database import Role, User, UserRole
+from ..database import Role, RoleCategory, User, UserRole
 from .base import AsyncRepository
 from ...auth.constants import ROLE_EXCLUSIVE_GROUPS
 
@@ -98,16 +98,35 @@ class UserRepository(AsyncRepository[User]):
         return result.scalar_one_or_none()
 
     async def list_roles(self) -> list[Role]:
-        result = await self.session.execute(select(Role))
+        result = await self.session.execute(select(Role).order_by(Role.category, Role.name))
         return list(result.scalars())
 
-    async def ensure_role(self, name: str, description: str | None = None) -> Role:
+    async def ensure_role(
+        self,
+        name: str,
+        description: str | None = None,
+        category: RoleCategory | None = None,
+    ) -> Role:
         role = await self.get_role_by_name(name)
         if role is None:
-            role = Role(name=name, description=description)
+            role = Role(
+                name=name,
+                description=description,
+                category=category or RoleCategory.workspace,
+            )
             await self.add(role)  # type: ignore[arg-type]
-            await self.commit()
-            await self.session.refresh(role)
+        else:
+            updated = False
+            if description is not None and role.description != description:
+                role.description = description
+                updated = True
+            if category is not None and role.category != category:
+                role.category = category
+                updated = True
+            if updated:
+                await self.session.flush()
+        await self.commit()
+        await self.session.refresh(role)
         return role
 
 

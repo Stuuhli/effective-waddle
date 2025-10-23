@@ -28,6 +28,13 @@ from ..config import Settings
 from .embeddings.base import EMBEDDING_DIMENSION
 
 
+class RoleCategory(str, PyEnum):
+    """Differentiate between permission roles and workspace roles."""
+
+    permission = "permission"
+    workspace = "workspace"
+
+
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -60,6 +67,12 @@ class Role(TimestampMixin, Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String(255))
+    category: Mapped[RoleCategory] = mapped_column(
+        SAEnum(RoleCategory, name="role_category"),
+        default=RoleCategory.workspace,
+        server_default=RoleCategory.workspace.value,
+        nullable=False,
+    )
 
     users: Mapped[list["User"]] = relationship(
         secondary=lambda: UserRole.__table__, back_populates="roles", lazy="selectin"
@@ -291,6 +304,7 @@ __all__ = [
     "Base",
     "User",
     "Role",
+    "RoleCategory",
     "UserRole",
     "Conversation",
     "Message",

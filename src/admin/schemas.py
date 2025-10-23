@@ -5,6 +5,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from ..infrastructure.database import RoleCategory
+
 
 class RoleCreate(BaseModel):
     name: str
@@ -32,10 +34,15 @@ class RoleResponse(BaseModel):
     id: str
     name: str
     description: str | None = None
+    category: RoleCategory
 
 
 class UserRoleUpdate(BaseModel):
     role_names: list[str]
+
+
+class UserStatusUpdate(BaseModel):
+    is_active: bool
 
 
 class CollectionCreate(BaseModel):
@@ -63,6 +70,7 @@ __all__ = [
     "FeatureFlagUpdate",
     "RoleResponse",
     "UserRoleUpdate",
+    "UserStatusUpdate",
     "CollectionCreate",
     "CollectionRolesUpdate",
     "CollectionAdminResponse",

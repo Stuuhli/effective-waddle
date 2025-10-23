@@ -18,6 +18,7 @@ from ..database import (
     IngestionStatus,
     IngestionStep,
     Role,
+    RoleCategory,
 )
 from .base import AsyncRepository
 
@@ -180,12 +181,17 @@ class DocumentRepository(AsyncRepository[Document]):
         return collection
 
     async def assign_collection_to_role(self, collection: Collection, role: Role) -> None:
+        if role.category is not RoleCategory.workspace:
+            raise ValueError("Only workspace roles can be assigned to collections")
         if role in collection.roles:
             return
         collection.roles.append(role)
         await self.session.flush()
 
     async def set_collection_roles(self, collection: Collection, roles: Sequence[Role]) -> None:
+        for role in roles:
+            if role.category is not RoleCategory.workspace:
+                raise ValueError("Only workspace roles can be assigned to collections")
         collection.roles = list(roles)
         await self.session.flush()
 
@@ -208,9 +214,10 @@ class DocumentRepository(AsyncRepository[Document]):
         return list(result.scalars())
 
     async def list_collections_for_roles(self, roles: list[Role]) -> list[Collection]:
-        if not roles:
+        workspace_roles = [role for role in roles if role.category is RoleCategory.workspace]
+        if not workspace_roles:
             return []
-        role_ids = [role.id for role in roles]
+        role_ids = [role.id for role in workspace_roles]
         stmt = (
             select(Collection)
             .join(Collection.roles)
