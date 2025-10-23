@@ -82,6 +82,16 @@ class UserRepository(AsyncRepository[User]):
         await self.session.flush()
         await self.commit()
 
+    async def set_user_roles(self, user: User, roles: Sequence[Role]) -> None:
+        """Replace the roles assigned to a user."""
+
+        await self.session.execute(
+            UserRole.__table__.delete().where(UserRole.user_id == user.id)
+        )
+        await self._assign_roles(user, roles)
+        await self.session.flush()
+        await self.commit()
+
     async def get_role_by_name(self, name: str) -> Optional[Role]:
         stmt = select(Role).where(Role.name == name)
         result = await self.session.execute(stmt)

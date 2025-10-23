@@ -28,4 +28,42 @@ class FeatureFlagUpdate(BaseModel):
     enable_graphrag: bool
 
 
-__all__ = ["RoleCreate", "RoleAssignment", "UserAdminResponse", "FeatureFlagUpdate"]
+class RoleResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+
+
+class UserRoleUpdate(BaseModel):
+    role_names: list[str]
+
+
+class CollectionCreate(BaseModel):
+    name: str
+    description: str | None = None
+    role_names: list[str] = []
+
+
+class CollectionRolesUpdate(BaseModel):
+    role_names: list[str]
+
+
+class CollectionAdminResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    roles: list[str]
+    document_count: int
+
+
+__all__ = [
+    "RoleCreate",
+    "RoleAssignment",
+    "UserAdminResponse",
+    "FeatureFlagUpdate",
+    "RoleResponse",
+    "UserRoleUpdate",
+    "CollectionCreate",
+    "CollectionRolesUpdate",
+    "CollectionAdminResponse",
+]

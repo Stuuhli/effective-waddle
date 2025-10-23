@@ -25,7 +25,14 @@ def test_non_admin_cannot_access_admin_routes(app: FastAPI) -> None:
                 token = login_response.json()["access_token"]
 
                 headers = {"Authorization": f"Bearer {token}"}
-                admin_response = await client.get("/admin/users", headers=headers)
-                assert admin_response.status_code == 403
+                for path, method, payload in [
+                    ("/admin/users", "get", None),
+                    ("/admin/roles", "get", None),
+                    ("/admin/collections", "get", None),
+                    ("/admin/roles", "post", {"name": "viewer"}),
+                ]:
+                    request = getattr(client, method)
+                    admin_response = await request(path, headers=headers, json=payload) if payload else await request(path, headers=headers)
+                    assert admin_response.status_code == 403
 
     asyncio.run(_run())

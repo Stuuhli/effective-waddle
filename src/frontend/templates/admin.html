@@ -1,48 +1,189 @@
 {% extends "base.html" %}
 
-{% block title %}RAG Platform – Admin Overview{% endblock %}
+{% block title %}RAG Platform – Admin Console{% endblock %}
 
 {% block styles %}
     <link rel="stylesheet" href="{{ url_for('frontend_static', path='ingestion.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('frontend_static', path='admin.css') }}" />
 {% endblock %}
 
 {% block body %}
     <header class="workspace-header">
       <div class="workspace-header__lead">
-        <h1>Admin Console (Coming Soon)</h1>
-        <p>Manage users, roles, and system feature flags. The interactive console will live here shortly.</p>
+        <h1>Admin Console</h1>
+        <p>Review accounts, assign roles, and control which collections each role can access.</p>
       </div>
       <div class="workspace-header__meta">
-        <span class="workspace-pill">Roles</span>
-        <span class="workspace-pill">Feature flags</span>
+        <span class="workspace-pill">Accounts</span>
+        <span class="workspace-pill">Collections</span>
       </div>
     </header>
 
-    <div class="ingestion-layout">
-      <section class="ingestion-panel">
+    <div class="ingestion-layout admin-layout">
+      <section class="ingestion-panel admin-panel" aria-labelledby="user-admin-heading">
         <header class="panel-heading">
           <div>
-            <h2>User management</h2>
-            <p>Provision and edit user accounts. The final UI will surface search, role assignment, and status toggles.</p>
+            <h2 id="user-admin-heading">Account management</h2>
+            <p>Assign platform roles to manage access to ingestion, chat, and GraphRAG features.</p>
+          </div>
+          <div class="panel-heading__actions">
+            <button class="button button--ghost" type="button" id="refresh-users">Refresh</button>
           </div>
         </header>
-        <div class="dropzone">
-          <p class="dropzone__text">Placeholder content</p>
-          <p class="dropzone__hint">This space will soon host tables, filters and actions for administrators.</p>
+        <div class="panel-content">
+          <section class="admin-card" aria-labelledby="user-table-heading">
+            <div class="admin-card__header">
+              <h3 id="user-table-heading">Current users</h3>
+              <p>Users inherit features from the roles shown below.</p>
+            </div>
+            <div class="table-scroll">
+              <table class="admin-table" id="user-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Email</th>
+                    <th scope="col">Roles</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody id="user-table-body">
+                  <tr>
+                    <td colspan="3" class="admin-table__empty">Loading users…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <form class="admin-form" id="user-role-form">
+            <fieldset class="admin-form__fieldset">
+              <legend>Assign roles to a user</legend>
+              <div class="admin-form__grid">
+                <label class="admin-form__field">
+                  <span>User</span>
+                  <select id="user-select" name="user" required>
+                    <option value="">Select a user…</option>
+                  </select>
+                </label>
+                <div class="admin-form__field" id="user-role-field">
+                  <span>Roles</span>
+                  <div class="role-checkboxes" id="user-role-options" data-role-checkboxes="user"></div>
+                </div>
+              </div>
+              <div class="admin-form__actions">
+                <button class="button button--primary" type="submit">Save roles</button>
+                <button class="button button--ghost" type="button" id="reset-user-form">Reset</button>
+              </div>
+              <p class="form-status" id="user-role-status" role="status" aria-live="polite"></p>
+            </fieldset>
+          </form>
+
+          <form class="admin-form" id="create-role-form">
+            <fieldset class="admin-form__fieldset">
+              <legend>Create a new role</legend>
+              <div class="admin-form__grid admin-form__grid--compact">
+                <label class="admin-form__field">
+                  <span>Role name</span>
+                  <input type="text" name="role-name" id="role-name" placeholder="e.g. auditor" required />
+                </label>
+                <label class="admin-form__field">
+                  <span>Description</span>
+                  <input type="text" name="role-description" id="role-description" placeholder="Optional" />
+                </label>
+              </div>
+              <div class="admin-form__actions">
+                <button class="button button--ghost" type="submit">Create role</button>
+              </div>
+              <p class="form-status" id="create-role-status" role="status" aria-live="polite"></p>
+            </fieldset>
+          </form>
         </div>
       </section>
 
-      <section class="ingestion-panel">
+      <section class="ingestion-panel admin-panel" aria-labelledby="collection-admin-heading">
         <header class="panel-heading">
           <div>
-            <h2>Feature controls</h2>
-            <p>Toggle GraphRAG, ingestion, and platform features once the configuration endpoint is available.</p>
+            <h2 id="collection-admin-heading">Collection access</h2>
+            <p>Bind document collections to roles to control who can ingest or query specific datasets.</p>
+          </div>
+          <div class="panel-heading__actions">
+            <button class="button button--ghost" type="button" id="refresh-collections">Refresh</button>
           </div>
         </header>
-        <div class="dropzone">
-          <p class="dropzone__text">Stay tuned</p>
-          <p class="dropzone__hint">Hook this view into your admin APIs to unlock advanced management workflows.</p>
+        <div class="panel-content">
+          <section class="admin-card" aria-labelledby="collection-table-heading">
+            <div class="admin-card__header">
+              <h3 id="collection-table-heading">Collections</h3>
+              <p>Each collection can be accessed by the roles shown below.</p>
+            </div>
+            <div class="table-scroll">
+              <table class="admin-table" id="collection-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Roles</th>
+                    <th scope="col">Documents</th>
+                  </tr>
+                </thead>
+                <tbody id="collection-table-body">
+                  <tr>
+                    <td colspan="3" class="admin-table__empty">Loading collections…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <form class="admin-form" id="create-collection-form">
+            <fieldset class="admin-form__fieldset">
+              <legend>Create collection</legend>
+              <div class="admin-form__grid admin-form__grid--compact">
+                <label class="admin-form__field">
+                  <span>Name</span>
+                  <input type="text" name="collection-name" id="collection-name" placeholder="e.g. finance" required />
+                </label>
+                <label class="admin-form__field">
+                  <span>Description</span>
+                  <input type="text" name="collection-description" id="collection-description" placeholder="Optional" />
+                </label>
+              </div>
+              <div class="admin-form__field">
+                <span>Initial roles</span>
+                <div class="role-checkboxes" id="collection-create-role-options" data-role-checkboxes="collection-create"></div>
+              </div>
+              <div class="admin-form__actions">
+                <button class="button button--ghost" type="submit">Create collection</button>
+              </div>
+              <p class="form-status" id="create-collection-status" role="status" aria-live="polite"></p>
+            </fieldset>
+          </form>
+
+          <form class="admin-form" id="collection-role-form">
+            <fieldset class="admin-form__fieldset">
+              <legend>Update collection access</legend>
+              <div class="admin-form__grid">
+                <label class="admin-form__field">
+                  <span>Collection</span>
+                  <select id="collection-select" name="collection" required>
+                    <option value="">Select a collection…</option>
+                  </select>
+                </label>
+                <div class="admin-form__field">
+                  <span>Roles</span>
+                  <div class="role-checkboxes" id="collection-role-options" data-role-checkboxes="collection"></div>
+                </div>
+              </div>
+              <div class="admin-form__actions">
+                <button class="button button--primary" type="submit">Save changes</button>
+                <button class="button button--ghost" type="button" id="reset-collection-form">Reset</button>
+              </div>
+              <p class="form-status" id="collection-role-status" role="status" aria-live="polite"></p>
+            </fieldset>
+          </form>
         </div>
       </section>
     </div>
+{% endblock %}
+
+{% block scripts %}
+    <script defer src="{{ url_for('frontend_static', path='admin.js') }}"></script>
 {% endblock %}
