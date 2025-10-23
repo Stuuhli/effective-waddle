@@ -1,21 +1,12 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RAG Platform – Chat</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      rel="stylesheet"
-      href="{{ url_for('frontend_static', path='chat.css') }}"
-    />
-  </head>
-  <body data-admin="{{ 'true' if is_admin else 'false' }}">
+{% extends "base.html" %}
+
+{% block title %}RAG Platform – Chat{% endblock %}
+
+{% block styles %}
+    <link rel="stylesheet" href="{{ url_for('frontend_static', path='chat.css') }}" />
+{% endblock %}
+
+{% block body %}
     <div class="chat-layout chat-layout--sidebar-open" id="chat-layout">
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__header">
@@ -116,6 +107,7 @@
         </form>
       </div>
     </div>
+{% endblock %}
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
@@ -175,11 +167,10 @@
         return '';
       }
 
-      const cookieValue = document.cookie.split('; ').find((row) => row.startsWith('rag_admin='));
-      const adminFlag = cookieValue ? cookieValue.split('=')[1] === '1' : document.body.dataset.admin === 'true';
-      if (!adminFlag && adminLinks) {
-        adminLinks.hidden = true;
-      }
+        const { isAdmin } = window.FrontendUtils;
+        if (!isAdmin() && adminLinks) {
+          adminLinks.hidden = true;
+        }
 
       function openSidebar() {
         const isFullscreen = layout.classList.contains('chat-layout--fullscreen');
@@ -230,7 +221,7 @@
         }
       });
 
-      sidebarClose?.addEventListener('click', closeSidebar);
+        sidebarClose?.addEventListener('click', closeSidebar);
 
       fullscreenToggle?.addEventListener('click', () => {
         const willEnable = !layout.classList.contains('chat-layout--fullscreen');
@@ -877,5 +868,4 @@
       applyStage('idle', stageMessages.idle);
       void loadConversations();
     </script>
-  </body>
-</html>
+{% endblock %}

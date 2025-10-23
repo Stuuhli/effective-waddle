@@ -394,24 +394,10 @@ body.chat-fullscreen {
   display: block;
 }
 
-.status-pill {
+.main__header .status-pill {
   margin-left: auto;
   padding: 0.5rem 1rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
   font-size: 0.85rem;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.75);
-  background: rgba(255, 255, 255, 0.08);
-  transition: border-color var(--transition), color var(--transition), background var(--transition);
-}
-
-.status-pill--streaming {
-  border-color: rgba(77, 208, 181, 0.55);
-  color: rgba(210, 255, 245, 0.95);
-  background: rgba(77, 208, 181, 0.15);
 }
 
 .status-pill--error {
@@ -835,7 +821,7 @@ body.chat-fullscreen .composer {
     flex-direction: column;
   }
 
-  .status-pill {
+  .main__header .status-pill {
     margin-left: 0;
   }
 }
