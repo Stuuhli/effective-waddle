@@ -125,11 +125,32 @@
       refreshCollections: document.getElementById('refresh-collections'),
       resetUserForm: document.getElementById('reset-user-form'),
       resetCollectionForm: document.getElementById('reset-collection-form'),
+      graphragPromptForm: document.getElementById('graphrag-prompt-form'),
+      graphragPromptStatus: document.getElementById('graphrag-prompt-status'),
+      graphragPromptOutput: document.getElementById('graphrag-prompt-output'),
+      resetGraphRagPrompt: document.getElementById('reset-graphrag-prompt'),
+      graphragIndexForm: document.getElementById('graphrag-index-form'),
+      graphragIndexStatus: document.getElementById('graphrag-index-status'),
+      graphragIndexOutput: document.getElementById('graphrag-index-output'),
+      resetGraphRagIndex: document.getElementById('reset-graphrag-index'),
     };
 
     const equalHeightSync = createEqualHeightSynchronizer();
     scheduleEqualRowHeights = equalHeightSync.apply;
     scheduleEqualRowHeights();
+
+    if (elements.graphragPromptOutput) {
+      showCommandPlaceholder(
+        elements.graphragPromptOutput,
+        'Run prompt tuning to view command output.',
+      );
+    }
+    if (elements.graphragIndexOutput) {
+      showCommandPlaceholder(
+        elements.graphragIndexOutput,
+        'Run indexing to view command output.',
+      );
+    }
 
     const ROLE_CATEGORIES = Object.freeze({
       PERMISSION: 'permission',
@@ -165,6 +186,183 @@
         element.classList.add('form-status--success');
       }
       scheduleEqualRowHeights();
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function readTrimmed(formData, name) {
+      if (!name) {
+        return '';
+      }
+      const raw = formData.get(name);
+      if (raw == null) {
+        return '';
+      }
+      return String(raw).trim();
+    }
+
+    function collectGraphRagBasePayload(formData, fieldNames = {}) {
+      const payload = {};
+      const rootName = fieldNames.root || 'graphrag-root';
+      const configName = fieldNames.config || 'graphrag-config';
+      const verboseName = fieldNames.verbose || 'graphrag-verbose';
+
+      const rootValue = readTrimmed(formData, rootName);
+      if (rootValue) {
+        payload.root = rootValue;
+      }
+
+      const configValue = readTrimmed(formData, configName);
+      if (configValue) {
+        payload.config = configValue;
+      }
+
+      if (verboseName) {
+        const choiceRaw = formData.get(verboseName);
+        if (choiceRaw !== null && choiceRaw !== undefined) {
+          const choice = String(choiceRaw);
+          if (choice === 'true') {
+            payload.verbose = true;
+          } else if (choice === 'false') {
+            payload.verbose = false;
+          }
+        }
+      }
+
+      return payload;
+    }
+
+    function showCommandPlaceholder(container, message) {
+      if (!container) {
+        return;
+      }
+      const text = message ? escapeHtml(message) : 'Command output will appear here.';
+      container.innerHTML = `<p class="command-output__hint">${text}</p>`;
+      scheduleEqualRowHeights();
+    }
+
+    function updateCommandOutput(container, result) {
+      if (!container) {
+        return;
+      }
+      if (!result) {
+        showCommandPlaceholder(container, 'Command output will appear here.');
+        return;
+      }
+      const exitCode =
+        typeof result.exit_code === 'number'
+          ? result.exit_code
+          : Number(result.exit_code ?? 0);
+      const success = Boolean(result.success);
+      const statusClass = success ? 'command-output__value--success' : 'command-output__value--error';
+      const statusLabel = success ? 'Success' : 'Failed';
+      const stdoutText = result.stdout ? String(result.stdout) : '(no output)';
+      const stderrText = result.stderr ? String(result.stderr) : '(no output)';
+      container.innerHTML = `
+        <div class="command-output__item">
+          <span class="command-output__label">Command</span>
+          <code class="command-output__command">${escapeHtml(result.command || '')}</code>
+        </div>
+        <div class="command-output__meta">
+          <div class="command-output__item">
+            <span class="command-output__label">Exit code</span>
+            <span class="command-output__value">${escapeHtml(String(exitCode))}</span>
+          </div>
+          <div class="command-output__item">
+            <span class="command-output__label">Result</span>
+            <span class="command-output__value ${statusClass}">${statusLabel}</span>
+          </div>
+        </div>
+        <div class="command-output__log">
+          <span class="command-output__label">stdout</span>
+          <pre>${escapeHtml(stdoutText)}</pre>
+        </div>
+        <div class="command-output__log">
+          <span class="command-output__label">stderr</span>
+          <pre>${escapeHtml(stderrText)}</pre>
+        </div>
+      `;
+      scheduleEqualRowHeights();
+    }
+
+    async function executeGraphRagCommand(options) {
+      const {
+        endpoint,
+        payload = {},
+        statusElement,
+        outputElement,
+        workingMessage,
+        successMessage,
+        failureMessage,
+        errorMessage,
+      } = options || {};
+      if (!endpoint) {
+        return null;
+      }
+
+      const previousMarkup = outputElement ? outputElement.innerHTML : '';
+      if (statusElement) {
+        setStatus(statusElement, workingMessage || 'Running command…', null);
+      }
+      if (outputElement) {
+        showCommandPlaceholder(outputElement, 'Running command…');
+      }
+
+      try {
+        const response = await fetch(
+          endpoint,
+          utils.withAuth({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }),
+        );
+        const contentType = response.headers.get('Content-Type') || '';
+        const isJson = contentType.includes('application/json');
+        const data = isJson ? await response.json() : null;
+        if (!response.ok) {
+          const detail =
+            data && typeof data.detail === 'string' && data.detail.trim()
+              ? data.detail.trim()
+              : errorMessage || 'Request failed.';
+          if (statusElement) {
+            setStatus(statusElement, detail, 'error');
+          }
+          if (outputElement) {
+            outputElement.innerHTML = previousMarkup;
+            scheduleEqualRowHeights();
+          }
+          return null;
+        }
+
+        if (outputElement) {
+          updateCommandOutput(outputElement, data);
+        }
+        if (statusElement) {
+          const success = Boolean(data.success);
+          const message = success ? successMessage : failureMessage;
+          const suffix = success ? '' : ` (exit code ${data.exit_code})`;
+          setStatus(statusElement, `${message}${suffix}`, success ? 'success' : 'error');
+        }
+        return data;
+      } catch (error) {
+        console.error(error);
+        if (statusElement) {
+          setStatus(statusElement, errorMessage || 'Unable to run command.', 'error');
+        }
+        if (outputElement) {
+          outputElement.innerHTML = previousMarkup;
+          scheduleEqualRowHeights();
+        }
+        return null;
+      }
     }
 
     function renderRoleCheckboxes(container, selectedNames, prefix, options = {}) {
@@ -718,6 +916,28 @@
       setStatus(elements.collectionRoleStatus, 'Selection cleared.', 'success');
     });
 
+    elements.resetGraphRagPrompt?.addEventListener('click', () => {
+      if (elements.graphragPromptForm instanceof HTMLFormElement) {
+        elements.graphragPromptForm.reset();
+      }
+      showCommandPlaceholder(
+        elements.graphragPromptOutput,
+        'Run prompt tuning to view command output.',
+      );
+      setStatus(elements.graphragPromptStatus, 'Form reset.', 'success');
+    });
+
+    elements.resetGraphRagIndex?.addEventListener('click', () => {
+      if (elements.graphragIndexForm instanceof HTMLFormElement) {
+        elements.graphragIndexForm.reset();
+      }
+      showCommandPlaceholder(
+        elements.graphragIndexOutput,
+        'Run indexing to view command output.',
+      );
+      setStatus(elements.graphragIndexStatus, 'Form reset.', 'success');
+    });
+
     elements.refreshUsers?.addEventListener('click', () => {
       loadUsers(true);
     });
@@ -863,6 +1083,72 @@
         console.error(error);
         setStatus(elements.collectionRoleStatus, 'Unable to update collection.', 'error');
       }
+    });
+
+    elements.graphragPromptForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+      const formData = new FormData(form);
+      const payload = collectGraphRagBasePayload(formData, {
+        root: 'graphrag-root',
+        config: 'graphrag-config',
+        verbose: 'graphrag-verbose',
+      });
+      const domainValue = readTrimmed(formData, 'graphrag-domain');
+      if (domainValue) {
+        payload.domain = domainValue;
+      }
+      const limitValue = readTrimmed(formData, 'graphrag-limit');
+      if (limitValue) {
+        const limitNumber = Number(limitValue);
+        if (!Number.isInteger(limitNumber) || limitNumber <= 0) {
+          setStatus(elements.graphragPromptStatus, 'Limit must be a positive integer.', 'error');
+          return;
+        }
+        payload.limit = limitNumber;
+      }
+
+      await executeGraphRagCommand({
+        endpoint: '/admin/graphrag/prompt-tune',
+        payload,
+        statusElement: elements.graphragPromptStatus,
+        outputElement: elements.graphragPromptOutput,
+        workingMessage: 'Running prompt tuning…',
+        successMessage: 'Prompt tuning completed.',
+        failureMessage: 'Prompt tuning finished with errors.',
+        errorMessage: 'Unable to run prompt tuning.',
+      });
+    });
+
+    elements.graphragIndexForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+      const formData = new FormData(form);
+      const payload = collectGraphRagBasePayload(formData, {
+        root: 'graphrag-index-root',
+        config: 'graphrag-index-config',
+        verbose: 'graphrag-index-verbose',
+      });
+      if (formData.get('graphrag-reset') === 'on') {
+        payload.reset = true;
+      }
+
+      await executeGraphRagCommand({
+        endpoint: '/admin/graphrag/index',
+        payload,
+        statusElement: elements.graphragIndexStatus,
+        outputElement: elements.graphragIndexOutput,
+        workingMessage: 'Running indexing…',
+        successMessage: 'Indexing completed.',
+        failureMessage: 'Indexing finished with errors.',
+        errorMessage: 'Unable to run indexing.',
+      });
     });
 
     (async () => {

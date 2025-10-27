@@ -183,6 +183,165 @@
           </form>
         </div>
       </section>
+
+      <section class="ingestion-panel admin-panel" aria-labelledby="graphrag-admin-heading">
+        <header class="panel-heading">
+          <div>
+            <h2 id="graphrag-admin-heading">GraphRAG operations</h2>
+            <p>Review configured defaults and run maintenance commands for the GraphRAG workspace.</p>
+          </div>
+        </header>
+        <div class="panel-content">
+          <section class="admin-card" aria-labelledby="graphrag-defaults-heading" data-equal-row="row-1">
+            <div class="admin-card__header">
+              <h3 id="graphrag-defaults-heading">Configured defaults</h3>
+              <p>Fields left blank below fall back to these application settings.</p>
+            </div>
+            <dl class="graphrag-defaults">
+              <div class="graphrag-defaults__item">
+                <dt>Workspace root</dt>
+                <dd>{{ graphrag_settings.root }}</dd>
+              </div>
+              <div class="graphrag-defaults__item">
+                <dt>Config file</dt>
+                <dd>
+                  {% if graphrag_settings.config %}
+                    {{ graphrag_settings.config }}
+                  {% else %}
+                    <span class="graphrag-defaults__empty">Not configured</span>
+                  {% endif %}
+                </dd>
+              </div>
+              <div class="graphrag-defaults__item">
+                <dt>Default query mode</dt>
+                <dd>{{ graphrag_settings.default_mode | title }}</dd>
+              </div>
+              <div class="graphrag-defaults__item">
+                <dt>Response type</dt>
+                <dd>{{ graphrag_settings.response_type }}</dd>
+              </div>
+              <div class="graphrag-defaults__item">
+                <dt>Community level</dt>
+                <dd>{{ graphrag_settings.community_level }}</dd>
+              </div>
+              <div class="graphrag-defaults__item">
+                <dt>Verbose logging</dt>
+                <dd>{{ 'Enabled' if graphrag_settings.verbose else 'Disabled' }}</dd>
+              </div>
+            </dl>
+            <p class="graphrag-defaults__hint">Overrides entered below apply only to the submitted command.</p>
+          </section>
+
+          <form class="admin-form" id="graphrag-prompt-form" data-equal-row="row-2">
+            <fieldset class="admin-form__fieldset">
+              <legend>Run prompt tuning</legend>
+              <div class="admin-form__grid admin-form__grid--compact">
+                <label class="admin-form__field">
+                  <span>Workspace root override</span>
+                  <input type="text" name="graphrag-root" placeholder="{{ graphrag_settings.root }}" autocomplete="off" />
+                  <span class="admin-form__hint">Leave blank to use {{ graphrag_settings.root }}.</span>
+                </label>
+                <label class="admin-form__field">
+                  <span>Config override</span>
+                  <input
+                    type="text"
+                    name="graphrag-config"
+                    placeholder="{{ graphrag_settings.config or 'settings.yaml' }}"
+                    autocomplete="off"
+                  />
+                  <span class="admin-form__hint">
+                    {% if graphrag_settings.config %}
+                      Leave blank to use {{ graphrag_settings.config }}.
+                    {% else %}
+                      Optional path to an alternate GraphRAG settings file.
+                    {% endif %}
+                  </span>
+                </label>
+              </div>
+              <div class="admin-form__grid admin-form__grid--compact">
+                <label class="admin-form__field">
+                  <span>Domain filter</span>
+                  <input type="text" name="graphrag-domain" placeholder="Optional domain" autocomplete="off" />
+                  <span class="admin-form__hint">Optional. Restrict prompt tuning to a specific domain.</span>
+                </label>
+                <label class="admin-form__field">
+                  <span>Result limit</span>
+                  <input type="number" name="graphrag-limit" min="1" step="1" placeholder="e.g. 25" />
+                  <span class="admin-form__hint">Optional positive integer.</span>
+                </label>
+                <label class="admin-form__field">
+                  <span>Verbosity</span>
+                  <select name="graphrag-verbose">
+                    <option value="default">
+                      Use platform default ({{ 'enabled' if graphrag_settings.verbose else 'disabled' }})
+                    </option>
+                    <option value="true">Force verbose output</option>
+                    <option value="false">Suppress verbose output</option>
+                  </select>
+                </label>
+              </div>
+              <div class="admin-form__actions">
+                <button class="button button--ghost" type="submit">Run prompt tuning</button>
+                <button class="button button--ghost" type="button" id="reset-graphrag-prompt">Reset</button>
+              </div>
+              <p class="form-status" id="graphrag-prompt-status" role="status" aria-live="polite"></p>
+              <div class="command-output" id="graphrag-prompt-output" aria-live="polite"></div>
+            </fieldset>
+          </form>
+
+          <form class="admin-form" id="graphrag-index-form" data-equal-row="row-3">
+            <fieldset class="admin-form__fieldset">
+              <legend>Rebuild GraphRAG index</legend>
+              <div class="admin-form__grid admin-form__grid--compact">
+                <label class="admin-form__field">
+                  <span>Workspace root override</span>
+                  <input type="text" name="graphrag-index-root" placeholder="{{ graphrag_settings.root }}" autocomplete="off" />
+                  <span class="admin-form__hint">Leave blank to use {{ graphrag_settings.root }}.</span>
+                </label>
+                <label class="admin-form__field">
+                  <span>Config override</span>
+                  <input
+                    type="text"
+                    name="graphrag-index-config"
+                    placeholder="{{ graphrag_settings.config or 'settings.yaml' }}"
+                    autocomplete="off"
+                  />
+                  <span class="admin-form__hint">
+                    {% if graphrag_settings.config %}
+                      Leave blank to use {{ graphrag_settings.config }}.
+                    {% else %}
+                      Optional path to an alternate GraphRAG settings file.
+                    {% endif %}
+                  </span>
+                </label>
+                <label class="admin-form__field">
+                  <span>Verbosity</span>
+                  <select name="graphrag-index-verbose">
+                    <option value="default">
+                      Use platform default ({{ 'enabled' if graphrag_settings.verbose else 'disabled' }})
+                    </option>
+                    <option value="true">Force verbose output</option>
+                    <option value="false">Suppress verbose output</option>
+                  </select>
+                </label>
+              </div>
+              <label class="admin-form__checkbox">
+                <input type="checkbox" name="graphrag-reset" />
+                <div>
+                  <span>Reset index before rebuilding</span>
+                  <span class="admin-form__hint">Deletes existing GraphRAG artefacts prior to indexing.</span>
+                </div>
+              </label>
+              <div class="admin-form__actions">
+                <button class="button button--ghost" type="submit">Run indexing</button>
+                <button class="button button--ghost" type="button" id="reset-graphrag-index">Reset</button>
+              </div>
+              <p class="form-status" id="graphrag-index-status" role="status" aria-live="polite"></p>
+              <div class="command-output" id="graphrag-index-output" aria-live="polite"></div>
+            </fieldset>
+          </form>
+        </div>
+      </section>
     </div>
 {% endblock %}
 
