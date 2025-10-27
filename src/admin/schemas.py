@@ -1,6 +1,7 @@
 """Schemas for admin operations."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel
@@ -61,6 +62,30 @@ class CollectionAdminResponse(BaseModel):
     description: str | None = None
     roles: list[str]
     document_count: int
+    
+    
+class GraphRAGCommandBase(BaseModel):
+
+    root: Path | None = None
+    config: Path | None = None
+    verbose: bool | None = None
+
+
+class GraphRAGPromptTuneRequest(GraphRAGCommandBase):
+    domain: str | None = None
+    limit: int | None = None
+
+
+class GraphRAGIndexRequest(GraphRAGCommandBase):
+    reset: bool | None = None
+
+
+class GraphRAGCommandResponse(BaseModel):
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+    success: bool
 
 
 __all__ = [
@@ -74,4 +99,7 @@ __all__ = [
     "CollectionCreate",
     "CollectionRolesUpdate",
     "CollectionAdminResponse",
+    "GraphRAGPromptTuneRequest",
+    "GraphRAGIndexRequest",
+    "GraphRAGCommandResponse",
 ]

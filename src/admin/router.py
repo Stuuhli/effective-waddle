@@ -9,6 +9,9 @@ from .schemas import (
     CollectionCreate,
     CollectionRolesUpdate,
     FeatureFlagUpdate,
+    GraphRAGCommandResponse,
+    GraphRAGIndexRequest,
+    GraphRAGPromptTuneRequest,
     RoleAssignment,
     RoleCreate,
     RoleResponse,
@@ -105,6 +108,22 @@ async def update_graphrag_flag(
         roles=[role.name for role in user.roles],
         is_active=user.is_active,
     )
+
+
+@router.post("/graphrag/prompt-tune", response_model=GraphRAGCommandResponse)
+async def trigger_graphrag_prompt_tune(
+    payload: GraphRAGPromptTuneRequest,
+    service: AdminService = Depends(get_admin_service),
+) -> GraphRAGCommandResponse:
+    return await service.run_graphrag_prompt_tune(payload)
+
+
+@router.post("/graphrag/index", response_model=GraphRAGCommandResponse)
+async def trigger_graphrag_index(
+    payload: GraphRAGIndexRequest,
+    service: AdminService = Depends(get_admin_service),
+) -> GraphRAGCommandResponse:
+    return await service.run_graphrag_index(payload)
 
 
 @router.get("/collections", response_model=list[CollectionAdminResponse])
