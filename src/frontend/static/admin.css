@@ -27,13 +27,12 @@
   }
 
   .panel-content {
-    display: grid;
     grid-template-rows: repeat(3, minmax(0, 1fr));
     gap: 1.75rem;
   }
 
   .panel-content > * {
-    height: 100%;
+    height: fit-content;
     min-height: 0;
   }
 
@@ -45,6 +44,24 @@
   .panel-content > form .admin-form__fieldset {
     flex: 1;
   }
+
+  .admin-panel--compact .panel-content {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .admin-panel--compact .panel-content > * {
+    height: auto;
+  }
+
+  .admin-panel--compact .panel-content > form {
+    display: block;
+  }
+
+  .admin-panel--compact .panel-content > form .admin-form__fieldset {
+    flex: initial;
+  }
+
 }
 
 .admin-card {

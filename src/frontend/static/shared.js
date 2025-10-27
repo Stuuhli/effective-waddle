@@ -56,6 +56,49 @@
     };
   }
 
+  const PREFETCH_ATTR = 'data-prefetch';
+  const PREFETCH_MODE = 'hover';
+  const prefetchRegistry = new Set();
+
+  function prefetchLink(url) {
+    if (!url || prefetchRegistry.has(url)) {
+      return;
+    }
+    prefetchRegistry.add(url);
+    const link = document.createElement('link');
+    link.rel = 'prefetch';
+    link.href = url;
+    link.as = 'document';
+    document.head.appendChild(link);
+  }
+
+  function enableHoverPrefetch(root = document) {
+    if (!root || !root.querySelectorAll) {
+      return;
+    }
+    const candidates = root.querySelectorAll(`[${PREFETCH_ATTR}="${PREFETCH_MODE}"]`);
+    candidates.forEach((element) => {
+      if (!(element instanceof HTMLAnchorElement) || element.dataset.prefetchBound === 'true') {
+        return;
+      }
+      const { href } = element;
+      const handlePrefetch = () => prefetchLink(href);
+      element.addEventListener('mouseenter', handlePrefetch, { once: true });
+      element.addEventListener('focus', handlePrefetch, { once: true });
+      element.dataset.prefetchBound = 'true';
+    });
+  }
+
+  function initSharedEnhancements() {
+    enableHoverPrefetch(document);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initSharedEnhancements, { once: true });
+  } else {
+    initSharedEnhancements();
+  }
+
   global.FrontendUtils = Object.freeze({
     getCookie,
     isAdmin,
@@ -63,5 +106,6 @@
     clearAuthCookies,
     redirectToLogin,
     currentUser,
+    enableHoverPrefetch,
   });
 })(window);

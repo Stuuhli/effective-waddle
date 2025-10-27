@@ -31,6 +31,14 @@ async def list_sessions(
     sessions = await service.list_sessions(user.id)
     return [ChatSessionResponse(id=conv.id, title=conv.title, created_at=conv.created_at) for conv in sessions]
 
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    service: RetrievalService = Depends(get_retrieval_service),
+) -> None:
+    await service.delete_session(session_id, user.id)
+
 @router.get("/{session_id}/messages", response_model=list[ChatMessageResponse])
 async def list_messages(
     session_id: str,

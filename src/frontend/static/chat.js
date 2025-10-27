@@ -42,11 +42,58 @@
 
     let isFullscreen = layout.classList.contains('chat-layout--fullscreen');
     let sidebarWasOpen = !layout.classList.contains('chat-layout--sidebar-hidden');
+    let activeConversationId = null;
 
     function setSidebarToggleState(isOpen) {
       sidebarToggleButton?.setAttribute('aria-pressed', String(isOpen));
       if (sidebarToggleIcon) {
         sidebarToggleIcon.innerHTML = isOpen ? SIDEBAR_OPEN_SVG : SIDEBAR_CLOSED_SVG;
+      }
+    }
+
+    function ensureConversationPlaceholder() {
+      if (!conversationList) {
+        return;
+      }
+      const items = conversationList.querySelectorAll('.conversation-list__item');
+      let emptyState = conversationList.querySelector('.conversation-list__empty');
+      if (items.length === 0) {
+        if (!emptyState) {
+          emptyState = document.createElement('li');
+          emptyState.className = 'conversation-list__empty';
+          emptyState.textContent = 'No conversations yet. Create your first one to begin.';
+          conversationList.appendChild(emptyState);
+        }
+      } else if (emptyState) {
+        emptyState.remove();
+      }
+    }
+
+    async function deleteConversation(conversationId, listItem) {
+      if (!conversationId || !listItem) {
+        return;
+      }
+      const confirmed = global.confirm('Delete this conversation and its messages?');
+      if (!confirmed) {
+        return;
+      }
+      try {
+        const response = await global.fetch(
+          `/chat/sessions/${conversationId}`,
+          utils.withAuth({ method: 'DELETE' }),
+        );
+        if (!response.ok) {
+          throw new Error(`Failed with status ${response.status}`);
+        }
+        listItem.remove();
+        ensureConversationPlaceholder();
+        if (activeConversationId === conversationId) {
+          activeConversationId = null;
+          appendMessage('system', 'Conversation deleted.');
+        }
+      } catch (error) {
+        console.error('Failed to delete conversation', error);
+        appendMessage('system', 'Deleting the conversation failed. Please try again.');
       }
     }
 
@@ -211,6 +258,16 @@
 
     conversationList?.addEventListener('click', (event) => {
       const target = event.target;
+      const deleteButton =
+        target instanceof HTMLElement ? target.closest('.conversation-list__delete') : null;
+      if (deleteButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const listItem = deleteButton.closest('.conversation-list__item');
+        const conversationId = deleteButton.dataset.deleteId || null;
+        deleteConversation(conversationId, listItem);
+        return;
+      }
       const button = target instanceof HTMLElement ? target.closest('button[data-id]') : null;
       if (!button) {
         return;
@@ -221,6 +278,7 @@
         .forEach((active) => active.classList.remove('conversation-list__button--active'));
 
       button.classList.add('conversation-list__button--active');
+      activeConversationId = button.dataset.id || null;
       const title = button.querySelector('.conversation-list__title');
       const label = title ? title.textContent : 'conversation';
       appendMessage('system', `Loaded conversation "${label}".`);
@@ -235,6 +293,7 @@
     isFullscreen = layout.classList.contains('chat-layout--fullscreen');
     updateFullscreenToggle(isFullscreen);
     setStreamingState('idle');
+    ensureConversationPlaceholder();
   }
 
   if (document.readyState === 'loading') {

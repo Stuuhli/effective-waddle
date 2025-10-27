@@ -52,6 +52,21 @@ class AdminService:
         return self._settings
 
 
+    @settings.setter
+    def settings(self, value: Settings | None) -> None:
+        self._settings = value or load_settings()
+
+
+    @property
+    def subprocess_factory(self) -> Callable[..., Awaitable[Process]]:
+        return self._subprocess_factory
+
+
+    @subprocess_factory.setter
+    def subprocess_factory(self, factory: Callable[..., Awaitable[Process]] | None) -> None:
+        self._subprocess_factory = factory or asyncio.create_subprocess_exec
+
+
     def _resolve_root(self, override: Path | None) -> Path:
         root_path = Path(override) if override is not None else Path(self.settings.graphrag.root_dir)
         return root_path.expanduser().resolve()

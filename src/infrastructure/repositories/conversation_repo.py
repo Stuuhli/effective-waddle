@@ -45,5 +45,9 @@ class ConversationRepository(AsyncRepository[Conversation]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def delete_conversation(self, conversation: Conversation) -> None:
+        await self.delete(conversation)
+        await self.commit()
+
 
 __all__ = ["ConversationRepository"]

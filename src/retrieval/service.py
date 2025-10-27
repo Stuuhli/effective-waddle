@@ -43,6 +43,12 @@ class RetrievalService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
         return await self.conversation_repo.list_messages(conversation_id)
 
+    async def delete_session(self, conversation_id: str, user_id: str) -> None:
+        conversation = await self.conversation_repo.get_conversation(conversation_id, user_id)
+        if conversation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        await self.conversation_repo.delete_conversation(conversation)
+
     def _resolve_strategy(self, roles: Iterable[str], mode: str | None) -> RetrievalStrategy:
         normalized_mode = mode.lower() if mode else None
         if normalized_mode == GRAPH_RAG_MODE_ALIAS:

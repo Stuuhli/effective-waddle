@@ -62,7 +62,7 @@ class GraphRAGSettings(BaseModel):
     """Configuration for the GraphRAG adapter."""
 
     root_dir: Path = Path("./graphrag_workspace")
-    config_path: Path | None = None
+    config_path: Path = Path("./graphrag_workspace/settings_local.yaml")
     default_mode: Literal["local", "global", "drift", "basic"] = "local"
     response_type: str = "Multiple Paragraphs"
     community_level: int = 2

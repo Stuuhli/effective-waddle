@@ -124,6 +124,7 @@ async def admin_page(request: Request, user: User = Depends(_current_user_from_c
         "graphrag_settings": {
             "root": str(graphrag.root_dir),
             "config": str(graphrag.config_path) if graphrag.config_path else "",
+            "config_name": Path(graphrag.config_path).name if graphrag.config_path else "",
             "default_mode": graphrag.default_mode,
             "response_type": graphrag.response_type,
             "community_level": graphrag.community_level,

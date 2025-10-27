@@ -31,7 +31,7 @@ class DummyProcess:
 async def test_prompt_tune_command_arguments(tmp_path: Path) -> None:
     settings = Settings()
     settings.graphrag.root_dir = tmp_path / "workspace"
-    settings.graphrag.config_path = tmp_path / "settings.yaml"
+    settings.graphrag.config_path = tmp_path / "settings_local.yaml"
     captured: dict[str, Any] = {}
 
     async def _fake_subprocess(*args: str, **kwargs: Any) -> DummyProcess:

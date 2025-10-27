@@ -1,0 +1,43 @@
+Bootstrap: docker
+From: python:3.11-slim
+
+%labels
+    Author tobi
+    Application KiRa
+
+%environment
+    export VIRTUAL_ENV=/opt/venv
+    export PATH=/opt/venv/bin:$PATH
+    export PYTHONPATH=/app/src
+    export PIP_NO_CACHE_DIR=1
+    export UVICORN_HOST=0.0.0.0
+    export UVICORN_PORT=8000
+
+%files
+    requirements/base.txt /app/requirements/base.txt
+    src /app/src
+    alembic /app/alembic
+    alembic.ini /app/alembic.ini
+    logging.ini /app/logging.ini
+    graphrag_workspace /app/graphrag_workspace
+    resources /app/resources
+    templates /app/templates
+    readme.md /app/readme.md
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential curl git libpq-dev libmagic1 libglib2.0-0 \
+        libsm6 libxrender1 libxext6 ffmpeg tesseract-ocr poppler-utils \
+        && rm -rf /var/lib/apt/lists/*
+    python -m venv /opt/venv
+    . /opt/venv/bin/activate
+    pip install --upgrade pip
+    pip install --no-cache-dir -r /app/requirements/base.txt
+    pip install --no-cache-dir uvicorn[standard]
+    mkdir -p /srv/data /srv/logs
+
+%runscript
+    exec uvicorn src.app:create_app --host ${UVICORN_HOST:-0.0.0.0} --port ${UVICORN_PORT:-8000}
+
+%startscript
+    exec "$0" run

@@ -35,6 +35,14 @@
                       {{ convo.updated_at.strftime("%Y-%m-%d %H:%M") if convo.updated_at else '' }}
                     </span>
                   </button>
+                  <button
+                    class="conversation-list__delete"
+                    type="button"
+                    aria-label="Delete conversation"
+                    data-delete-id="{{ convo.id }}"
+                  >
+                    <span class="icon icon--close" aria-hidden="true"></span>
+                  </button>
                 </li>
               {% endfor %}
             {% else %}
@@ -44,8 +52,8 @@
         </nav>
         <nav class="sidebar__section sidebar__section--admin" id="admin-links" aria-label="Admin tools">
           <h3>Admin tools</h3>
-          <a class="sidebar__link" href="/frontend/ingestion">Ingestion Console</a>
-          <a class="sidebar__link" href="/frontend/admin">Admin Console</a>
+          <a class="sidebar__link" href="/frontend/ingestion" data-prefetch="hover">Ingestion Console</a>
+          <a class="sidebar__link" href="/frontend/admin" data-prefetch="hover">Admin Console</a>
         </nav>
       </aside>
 

@@ -17,14 +17,17 @@
         <span class="workspace-pill">Accounts</span>
         <span class="workspace-pill">Collections</span>
       </div>
+      <div class="workspace-header__actions">
+        <a class="button button--ghost" href="/frontend/chat" data-prefetch="hover">Back to Chat</a>
+      </div>
     </header>
 
     <div class="ingestion-layout smoke-panel admin-layout">
-      <section class="ingestion-panel admin-panel" aria-labelledby="user-admin-heading">
+      <section class="ingestion-panel admin-panel admin-panel--compact" aria-labelledby="user-admin-heading">
         <header class="panel-heading">
           <div>
             <h2 id="user-admin-heading">Account management</h2>
-            <p>Assign platform roles to manage access to ingestion, chat, and GraphRAG features.</p>
+            <p>Assign platform roles to manage access to ingestion, chat, and GraphRAG.</p>
           </div>
           <div class="panel-heading__actions">
             <button class="button button--ghost" type="button" id="refresh-users">Refresh</button>
@@ -100,7 +103,7 @@
         </div>
       </section>
 
-      <section class="ingestion-panel admin-panel" aria-labelledby="collection-admin-heading">
+      <section class="ingestion-panel admin-panel admin-panel--compact" aria-labelledby="collection-admin-heading">
         <header class="panel-heading">
           <div>
             <h2 id="collection-admin-heading">Collection access</h2>
@@ -192,7 +195,7 @@
           </div>
         </header>
         <div class="panel-content">
-          <section class="admin-card" aria-labelledby="graphrag-defaults-heading" data-equal-row="row-1">
+          <section class="admin-card" aria-labelledby="graphrag-defaults-heading">
             <div class="admin-card__header">
               <h3 id="graphrag-defaults-heading">Configured defaults</h3>
               <p>Fields left blank below fall back to these application settings.</p>
@@ -203,12 +206,12 @@
                 <dd>{{ graphrag_settings.root }}</dd>
               </div>
               <div class="graphrag-defaults__item">
-                <dt>Config file</dt>
+                <dt>Settings file</dt>
                 <dd>
-                  {% if graphrag_settings.config %}
-                    {{ graphrag_settings.config }}
+                  {% if graphrag_settings.config_name %}
+                    {{ graphrag_settings.config_name }}
                   {% else %}
-                    <span class="graphrag-defaults__empty">Not configured</span>
+                    settings_local.yaml
                   {% endif %}
                 </dd>
               </div>
@@ -232,30 +235,18 @@
             <p class="graphrag-defaults__hint">Overrides entered below apply only to the submitted command.</p>
           </section>
 
-          <form class="admin-form" id="graphrag-prompt-form" data-equal-row="row-2">
+          <form class="admin-form" id="graphrag-prompt-form">
             <fieldset class="admin-form__fieldset">
               <legend>Run prompt tuning</legend>
               <div class="admin-form__grid admin-form__grid--compact">
                 <label class="admin-form__field">
-                  <span>Workspace root override</span>
-                  <input type="text" name="graphrag-root" placeholder="{{ graphrag_settings.root }}" autocomplete="off" />
-                  <span class="admin-form__hint">Leave blank to use {{ graphrag_settings.root }}.</span>
-                </label>
-                <label class="admin-form__field">
                   <span>Config override</span>
-                  <input
-                    type="text"
-                    name="graphrag-config"
-                    placeholder="{{ graphrag_settings.config or 'settings.yaml' }}"
-                    autocomplete="off"
-                  />
-                  <span class="admin-form__hint">
-                    {% if graphrag_settings.config %}
-                      Leave blank to use {{ graphrag_settings.config }}.
-                    {% else %}
-                      Optional path to an alternate GraphRAG settings file.
-                    {% endif %}
-                  </span>
+                  {% set current_config = graphrag_settings.config %}
+                  <select name="graphrag-config">
+                    <option value="graphrag_workspace/settings_local.yaml" {% if not current_config or current_config.endswith('settings_local.yaml') %}selected{% endif %}>settings_local.yaml</option>
+                    <option value="graphrag_workspace/settings_HPC.yaml" {% if current_config and current_config.endswith('settings_HPC.yaml') %}selected{% endif %}>settings_HPC.yaml</option>
+                  </select>
+                  <span class="admin-form__hint">Choose the GraphRAG settings profile.</span>
                 </label>
               </div>
               <div class="admin-form__grid admin-form__grid--compact">
@@ -266,7 +257,7 @@
                 </label>
                 <label class="admin-form__field">
                   <span>Result limit</span>
-                  <input type="number" name="graphrag-limit" min="1" step="1" placeholder="e.g. 25" />
+                  <input type="number" name="graphrag-limit" min="1" step="1" placeholder="e.g. 5" />
                   <span class="admin-form__hint">Optional positive integer.</span>
                 </label>
                 <label class="admin-form__field">
@@ -289,30 +280,18 @@
             </fieldset>
           </form>
 
-          <form class="admin-form" id="graphrag-index-form" data-equal-row="row-3">
+          <form class="admin-form" id="graphrag-index-form">
             <fieldset class="admin-form__fieldset">
               <legend>Rebuild GraphRAG index</legend>
               <div class="admin-form__grid admin-form__grid--compact">
                 <label class="admin-form__field">
-                  <span>Workspace root override</span>
-                  <input type="text" name="graphrag-index-root" placeholder="{{ graphrag_settings.root }}" autocomplete="off" />
-                  <span class="admin-form__hint">Leave blank to use {{ graphrag_settings.root }}.</span>
-                </label>
-                <label class="admin-form__field">
                   <span>Config override</span>
-                  <input
-                    type="text"
-                    name="graphrag-index-config"
-                    placeholder="{{ graphrag_settings.config or 'settings.yaml' }}"
-                    autocomplete="off"
-                  />
-                  <span class="admin-form__hint">
-                    {% if graphrag_settings.config %}
-                      Leave blank to use {{ graphrag_settings.config }}.
-                    {% else %}
-                      Optional path to an alternate GraphRAG settings file.
-                    {% endif %}
-                  </span>
+                  {% set current_index_config = graphrag_settings.config %}
+                  <select name="graphrag-index-config">
+                    <option value="graphrag_workspace/settings_local.yaml" {% if not current_index_config or current_index_config.endswith('settings_local.yaml') %}selected{% endif %}>settings_local.yaml</option>
+                    <option value="graphrag_workspace/settings_HPC.yaml" {% if current_index_config and current_index_config.endswith('settings_HPC.yaml') %}selected{% endif %}>settings_HPC.yaml</option>
+                  </select>
+                  <span class="admin-form__hint">Choose the GraphRAG settings profile.</span>
                 </label>
                 <label class="admin-form__field">
                   <span>Verbosity</span>

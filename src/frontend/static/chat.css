@@ -250,6 +250,9 @@ body.chat-fullscreen {
 
 .conversation-list__item {
   margin: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
 }
 
 .conversation-list__button {
@@ -282,6 +285,28 @@ body.chat-fullscreen {
 .conversation-list__meta {
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.55);
+}
+
+.conversation-list__delete {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.8);
+  padding: 0;
+  width: 2.35rem;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform 160ms ease;
+}
+
+.conversation-list__delete:hover,
+.conversation-list__delete:focus-visible {
+  background: rgba(255, 107, 129, 0.22);
+  border-color: rgba(255, 107, 129, 0.45);
+  color: #ffdde3;
+  transform: translateY(-1px);
 }
 
 .conversation-list__empty {

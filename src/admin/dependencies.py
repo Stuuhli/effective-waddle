@@ -15,7 +15,7 @@ async def get_admin_service(session: AsyncSession = Depends(get_db_session)) -> 
     user_repo = UserRepository(session)
     document_repo = DocumentRepository(session)
     settings = get_settings()
-    return AdminService(user_repo, document_repo, settings)
+    return AdminService(user_repo, document_repo, settings=settings)
 
 
 def admin_required():
