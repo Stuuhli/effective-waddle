@@ -18,48 +18,54 @@
 
     let frameId = 0;
 
-    function resetHeights(elements) {
-      elements.forEach((element) => {
-        element.style.removeProperty('min-height');
-        element.style.removeProperty('minHeight');
+    function collectGroups() {
+      const groups = new Map();
+      document.querySelectorAll(EQUAL_ROW_SELECTOR).forEach((element) => {
+        const key = element.dataset.equalRow;
+        if (!key) {
+          return;
+        }
+        if (!groups.has(key)) {
+          groups.set(key, []);
+        }
+        groups.get(key).push(element);
+      });
+      return groups;
+    }
+
+    function resetGroupHeights(group) {
+      group.forEach((element) => {
+        element.style.minHeight = '';
       });
     }
 
     function apply() {
       frameId = 0;
-      const elements = Array.from(document.querySelectorAll(EQUAL_ROW_SELECTOR));
-      if (!elements.length) {
+      const groups = collectGroups();
+      if (!groups.size) {
         return;
       }
 
-      resetHeights(elements);
+      groups.forEach((group) => {
+        resetGroupHeights(group);
+      });
 
       if (!mediaQuery.matches) {
         return;
       }
 
-      const grouped = elements.reduce((accumulator, element) => {
-        const key = element.dataset.equalRow;
-        if (!key) {
-          return accumulator;
-        }
-        if (!accumulator[key]) {
-          accumulator[key] = [];
-        }
-        accumulator[key].push(element);
-        return accumulator;
-      }, {});
-
-      Object.values(grouped).forEach((group) => {
+      groups.forEach((group) => {
         if (!Array.isArray(group) || group.length < 2) {
           return;
         }
-        const maxHeight = group.reduce((max, element) => {
-          const { height } = element.getBoundingClientRect();
-          return Math.max(max, height);
-        }, 0);
+        let tallest = 0;
         group.forEach((element) => {
-          element.style.minHeight = `${Math.ceil(maxHeight)}px`;
+          const { height } = element.getBoundingClientRect();
+          tallest = Math.max(tallest, height);
+        });
+        const targetHeight = `${Math.ceil(tallest)}px`;
+        group.forEach((element) => {
+          element.style.minHeight = targetHeight;
         });
       });
     }
@@ -71,16 +77,24 @@
       frameId = requestFrame(apply);
     }
 
+    const handleChange = () => schedule();
+
     if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', schedule);
+      mediaQuery.addEventListener('change', handleChange);
     } else if (typeof mediaQuery.addListener === 'function') {
-      mediaQuery.addListener(schedule);
+      mediaQuery.addListener(handleChange);
     }
-    window.addEventListener('resize', schedule, { passive: true });
+    window.addEventListener('resize', handleChange, { passive: true });
 
     return {
       schedule,
-      apply,
+      apply: () => {
+        if (frameId) {
+          cancelFrame(frameId);
+          frameId = 0;
+        }
+        apply();
+      },
     };
   }
 
@@ -114,8 +128,8 @@
     };
 
     const equalHeightSync = createEqualHeightSynchronizer();
-    scheduleEqualRowHeights = equalHeightSync.schedule;
-    equalHeightSync.schedule();
+    scheduleEqualRowHeights = equalHeightSync.apply;
+    scheduleEqualRowHeights();
 
     const ROLE_CATEGORIES = Object.freeze({
       PERMISSION: 'permission',
@@ -244,7 +258,7 @@
 
         const rolesCell = document.createElement('td');
         const rolesWrapper = document.createElement('div');
-        rolesWrapper.className = 'table-multi';
+        rolesWrapper.className = 'table-cell table-cell--wrap';
         if (user.roles.length) {
           user.roles.forEach((roleName) => {
             const pill = document.createElement('span');

@@ -128,22 +128,6 @@
   font-weight: 500;
 }
 
-.table-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 32px;
-}
-
-.table-cell--wrap {
-  flex-wrap: wrap;
-  align-items: flex-start;
-}
-
-.table-cell--end {
-  justify-content: flex-end;
-}
-
 .status-pill {
   display: inline-flex;
   align-items: center;
