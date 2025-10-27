@@ -13,12 +13,16 @@
     />
     <link
       rel="stylesheet"
+      href="{{ url_for('frontend_static', path='base.css') }}"
+    />
+    <link
+      rel="stylesheet"
       href="{{ url_for('frontend_static', path='login.css') }}"
     />
   </head>
   <body>
     <main class="page">
-      <section class="card">
+      <section class="card smoke-panel">
         <header class="card__header">
           <div class="card__badge">KiRa - KISTERS RAG PLATFORM</div>
           <h1 class="card__title">Welcome back</h1>

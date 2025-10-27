@@ -1,6 +1,89 @@
 (function (global) {
   'use strict';
 
+  const EQUAL_ROW_SELECTOR = '[data-equal-row]';
+  const DESKTOP_BREAKPOINT = '(min-width: 1081px)';
+  let scheduleEqualRowHeights = () => {};
+
+  function createEqualHeightSynchronizer() {
+    const mediaQuery = window.matchMedia(DESKTOP_BREAKPOINT);
+    const requestFrame =
+      typeof window.requestAnimationFrame === 'function'
+        ? window.requestAnimationFrame.bind(window)
+        : (callback) => setTimeout(callback, 16);
+    const cancelFrame =
+      typeof window.cancelAnimationFrame === 'function'
+        ? window.cancelAnimationFrame.bind(window)
+        : clearTimeout;
+
+    let frameId = 0;
+
+    function resetHeights(elements) {
+      elements.forEach((element) => {
+        element.style.removeProperty('min-height');
+        element.style.removeProperty('minHeight');
+      });
+    }
+
+    function apply() {
+      frameId = 0;
+      const elements = Array.from(document.querySelectorAll(EQUAL_ROW_SELECTOR));
+      if (!elements.length) {
+        return;
+      }
+
+      resetHeights(elements);
+
+      if (!mediaQuery.matches) {
+        return;
+      }
+
+      const grouped = elements.reduce((accumulator, element) => {
+        const key = element.dataset.equalRow;
+        if (!key) {
+          return accumulator;
+        }
+        if (!accumulator[key]) {
+          accumulator[key] = [];
+        }
+        accumulator[key].push(element);
+        return accumulator;
+      }, {});
+
+      Object.values(grouped).forEach((group) => {
+        if (!Array.isArray(group) || group.length < 2) {
+          return;
+        }
+        const maxHeight = group.reduce((max, element) => {
+          const { height } = element.getBoundingClientRect();
+          return Math.max(max, height);
+        }, 0);
+        group.forEach((element) => {
+          element.style.minHeight = `${Math.ceil(maxHeight)}px`;
+        });
+      });
+    }
+
+    function schedule() {
+      if (frameId) {
+        cancelFrame(frameId);
+      }
+      frameId = requestFrame(apply);
+    }
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', schedule);
+    } else if (typeof mediaQuery.addListener === 'function') {
+      mediaQuery.addListener(schedule);
+    }
+    window.addEventListener('resize', schedule, { passive: true });
+
+    return {
+      schedule,
+      apply,
+    };
+  }
+
   function init() {
     const utils = global.FrontendUtils;
     if (!utils) {
@@ -29,6 +112,10 @@
       resetUserForm: document.getElementById('reset-user-form'),
       resetCollectionForm: document.getElementById('reset-collection-form'),
     };
+
+    const equalHeightSync = createEqualHeightSynchronizer();
+    scheduleEqualRowHeights = equalHeightSync.schedule;
+    equalHeightSync.schedule();
 
     const ROLE_CATEGORIES = Object.freeze({
       PERMISSION: 'permission',
@@ -63,6 +150,7 @@
       } else if (variant === 'success') {
         element.classList.add('form-status--success');
       }
+      scheduleEqualRowHeights();
     }
 
     function renderRoleCheckboxes(container, selectedNames, prefix, options = {}) {
@@ -130,6 +218,7 @@
         empty.textContent = options.emptyMessage || 'No roles available. Create one first.';
         container.appendChild(empty);
       }
+      scheduleEqualRowHeights();
     }
 
     function renderUsers() {
@@ -142,6 +231,7 @@
         const row = document.createElement('tr');
         row.innerHTML = '<td colspan="4" class="admin-table__empty">No users found.</td>';
         tbody.appendChild(row);
+        scheduleEqualRowHeights();
         return;
       }
       state.users.forEach((user) => {
@@ -153,24 +243,27 @@
         row.appendChild(emailCell);
 
         const rolesCell = document.createElement('td');
+        const rolesWrapper = document.createElement('div');
+        rolesWrapper.className = 'table-multi';
         if (user.roles.length) {
           user.roles.forEach((roleName) => {
             const pill = document.createElement('span');
             pill.className = 'role-pill';
             pill.textContent = roleName;
-            rolesCell.appendChild(pill);
+            rolesWrapper.appendChild(pill);
           });
         } else {
           const hint = document.createElement('span');
           hint.className = 'admin-table__hint';
           hint.textContent = 'No roles assigned';
-          rolesCell.appendChild(hint);
+          rolesWrapper.appendChild(hint);
         }
+        rolesCell.appendChild(rolesWrapper);
         row.appendChild(rolesCell);
 
         const statusCell = document.createElement('td');
         const statusWrapper = document.createElement('div');
-        statusWrapper.className = 'status-cell';
+        statusWrapper.className = 'table-cell';
         const statusPill = document.createElement('span');
         statusPill.className = 'status-pill';
         statusPill.textContent = user.is_active ? 'Active' : 'Inactive';
@@ -195,6 +288,9 @@
 
         const actionsCell = document.createElement('td');
         actionsCell.className = 'table-actions';
+        const actionsWrapper = document.createElement('div');
+        actionsWrapper.className = 'table-cell table-cell--end';
+
         const deleteButton = document.createElement('button');
         deleteButton.type = 'button';
         deleteButton.className = 'icon-button icon-button--danger';
@@ -203,11 +299,13 @@
         deleteButton.setAttribute('aria-label', `Delete ${user.email}`);
         deleteButton.title = `Delete ${user.email}`;
         deleteButton.innerHTML = ICONS.delete;
-        actionsCell.appendChild(deleteButton);
+        actionsWrapper.appendChild(deleteButton);
+        actionsCell.appendChild(actionsWrapper);
         row.appendChild(actionsCell);
 
         tbody.appendChild(row);
       });
+      scheduleEqualRowHeights();
     }
 
     function renderCollections() {
@@ -220,6 +318,7 @@
         const row = document.createElement('tr');
         row.innerHTML = '<td colspan="4" class="admin-table__empty">No collections found.</td>';
         tbody.appendChild(row);
+        scheduleEqualRowHeights();
         return;
       }
       state.collections.forEach((collection) => {
@@ -231,19 +330,22 @@
         row.appendChild(nameCell);
 
         const rolesCell = document.createElement('td');
+        const rolesWrapper = document.createElement('div');
+        rolesWrapper.className = 'table-cell table-cell--wrap';
         if (collection.roles.length) {
           collection.roles.forEach((roleName) => {
             const pill = document.createElement('span');
             pill.className = 'role-pill';
             pill.textContent = roleName;
-            rolesCell.appendChild(pill);
+            rolesWrapper.appendChild(pill);
           });
         } else {
           const hint = document.createElement('span');
           hint.className = 'admin-table__hint';
           hint.textContent = 'No roles assigned';
-          rolesCell.appendChild(hint);
+          rolesWrapper.appendChild(hint);
         }
+        rolesCell.appendChild(rolesWrapper);
         row.appendChild(rolesCell);
 
         const countCell = document.createElement('td');
@@ -252,6 +354,9 @@
 
         const actionsCell = document.createElement('td');
         actionsCell.className = 'table-actions';
+        const actionsWrapper = document.createElement('div');
+        actionsWrapper.className = 'table-cell table-cell--end';
+
         const deleteButton = document.createElement('button');
         deleteButton.type = 'button';
         deleteButton.className = 'icon-button icon-button--danger';
@@ -260,11 +365,13 @@
         deleteButton.setAttribute('aria-label', `Delete ${collection.name}`);
         deleteButton.title = `Delete ${collection.name}`;
         deleteButton.innerHTML = ICONS.delete;
-        actionsCell.appendChild(deleteButton);
+        actionsWrapper.appendChild(deleteButton);
+        actionsCell.appendChild(actionsWrapper);
         row.appendChild(actionsCell);
 
         tbody.appendChild(row);
       });
+      scheduleEqualRowHeights();
     }
 
     function renderUserSelect() {

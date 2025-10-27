@@ -63,14 +63,6 @@ body.chat-fullscreen {
   position: relative;
 }
 
-.chat-layout::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
-}
-
 .chat-layout--sidebar-hidden {
   grid-template-columns: 0 1fr;
 }
@@ -408,6 +400,9 @@ body.chat-fullscreen {
   gap: 1rem;
   padding-right: 0.5rem;
   min-height: 0;
+}
+.chat-window.smoke-panel::after {
+  opacity: 0.35;
 }
 
 .message {

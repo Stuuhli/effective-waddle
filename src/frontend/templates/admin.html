@@ -19,7 +19,7 @@
       </div>
     </header>
 
-    <div class="ingestion-layout admin-layout">
+    <div class="ingestion-layout smoke-panel admin-layout">
       <section class="ingestion-panel admin-panel" aria-labelledby="user-admin-heading">
         <header class="panel-heading">
           <div>
@@ -31,7 +31,7 @@
           </div>
         </header>
         <div class="panel-content">
-          <section class="admin-card" aria-labelledby="user-table-heading">
+          <section class="admin-card" aria-labelledby="user-table-heading" data-equal-row="row-1">
             <div class="admin-card__header">
               <h3 id="user-table-heading">Current users</h3>
               <p>Users inherit features from the roles shown below.</p>
@@ -55,7 +55,7 @@
             </div>
           </section>
 
-          <form class="admin-form" id="user-role-form">
+          <form class="admin-form" id="user-role-form" data-equal-row="row-2">
             <fieldset class="admin-form__fieldset">
               <legend>Assign roles to a user</legend>
               <div class="admin-form__grid">
@@ -78,7 +78,7 @@
             </fieldset>
           </form>
 
-          <form class="admin-form" id="create-role-form">
+          <form class="admin-form" id="create-role-form" data-equal-row="row-3">
             <fieldset class="admin-form__fieldset">
               <legend>Create a new role</legend>
               <div class="admin-form__grid admin-form__grid--compact">
@@ -104,14 +104,14 @@
         <header class="panel-heading">
           <div>
             <h2 id="collection-admin-heading">Collection access</h2>
-            <p>Bind document collections to roles to control who can ingest or query specific datasets.</p>
+            <p>Bind collections to roles to control who can ingest or query specific datasets.</p>
           </div>
           <div class="panel-heading__actions">
             <button class="button button--ghost" type="button" id="refresh-collections">Refresh</button>
           </div>
         </header>
         <div class="panel-content">
-          <section class="admin-card" aria-labelledby="collection-table-heading">
+          <section class="admin-card" aria-labelledby="collection-table-heading" data-equal-row="row-1">
             <div class="admin-card__header">
               <h3 id="collection-table-heading">Collections</h3>
               <p>Each collection can be accessed by the roles shown below.</p>
@@ -135,7 +135,7 @@
             </div>
           </section>
 
-          <form class="admin-form" id="create-collection-form">
+          <form class="admin-form" id="create-collection-form" data-equal-row="row-2">
             <fieldset class="admin-form__fieldset">
               <legend>Create collection</legend>
               <div class="admin-form__grid admin-form__grid--compact">
@@ -159,7 +159,7 @@
             </fieldset>
           </form>
 
-          <form class="admin-form" id="collection-role-form">
+          <form class="admin-form" id="collection-role-form" data-equal-row="row-3">
             <fieldset class="admin-form__fieldset">
               <legend>Update collection access</legend>
               <div class="admin-form__grid">

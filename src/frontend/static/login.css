@@ -64,26 +64,6 @@ body {
   overflow: hidden;
 }
 
-.card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
-  mix-blend-mode: screen;
-  opacity: 0.75;
-}
-
-.card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image: url('data:image/svg+xml,%3Csvg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"120\" viewBox=\"0 0 120 120\"%3E%3Cfilter id=\"f\"%3E%3CfeTurbulence type=\"fractalNoise\" baseFrequency=\"1.2\" numOctaves=\"3\"/%3E%3C/filter%3E%3Crect width=\"120\" height=\"120\" filter=\"url(%23f)\" opacity=\"0.35\"/%3E%3C/svg%3E');
-  opacity: 0.55;
-}
-
 .card__header {
   text-align: center;
   display: flex;
