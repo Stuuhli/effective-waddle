@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -91,6 +91,7 @@ class StorageSettings(BaseModel):
     upload_dir: Path = Path("storage/uploads")
     docling_output_dir: Path = Path("storage/docling")
     docling_hash_index: Path = Path("storage/docling/index.json")
+    model_config = ConfigDict(frozen=True)
 
 
 class DoclingSettings(BaseModel):

@@ -66,3 +66,21 @@ def test_locator_rejects_outside_directory(tmp_path: Path) -> None:
     resolved = locator.locate_from_metadata(metadata, 1)
 
     assert resolved is None
+
+
+def test_mimetype_for_known_extension(tmp_path: Path) -> None:
+    path = tmp_path / "page-1.png"
+    path.write_bytes(b"")
+
+    locator = DoclingImageLocator(storage=StorageSettings())
+
+    assert locator.mimetype_for(path) == "image/png"
+
+
+def test_mimetype_for_unknown_extension(tmp_path: Path) -> None:
+    path = tmp_path / "page-1.custom"
+    path.write_bytes(b"")
+
+    locator = DoclingImageLocator(storage=StorageSettings())
+
+    assert locator.mimetype_for(path) == "application/octet-stream"

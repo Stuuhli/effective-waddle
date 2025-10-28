@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import mimetypes
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
@@ -160,6 +161,14 @@ class DoclingImageLocator:
         if docling_root in resolved.parents or resolved == docling_root:
             return resolved
         return None
+
+    def mimetype_for(self, path: Path) -> str:
+        """Return an appropriate mimetype for a resolved preview image."""
+
+        guessed, _ = mimetypes.guess_type(str(path))
+        if isinstance(guessed, str):
+            return guessed
+        return "application/octet-stream"
 
 
 @lru_cache(maxsize=1)
