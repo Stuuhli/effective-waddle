@@ -224,7 +224,7 @@
         try {
           activeStream.cancelRender();
         } catch (error) {
-          console.warn('Failed to cancel render', error);
+          console.warn('Failed to cancel pending render', error);
         }
       }
       if (activeStream?.controller) {
@@ -645,17 +645,9 @@
         const resolvedPreview = previewUrl || fallbackUrl;
         if (resolvedPreview) {
           button.dataset.previewUrl = resolvedPreview;
-          button.addEventListener('click', () => {
-            const url = resolvedPreview.startsWith('http')
-              ? resolvedPreview
-              : resolvedPreview.startsWith('/')
-                ? resolvedPreview
-                : `${resolvedPreview}`;
-            const token = utils.getCookie('rag_token') || '';
-            const hasQuery = url.includes('?');
-            const separator = hasQuery ? '&' : '?';
-            const authedUrl = token ? `${url}${separator}token=${encodeURIComponent(token)}` : url;
-            window.open(authedUrl, '_blank', 'noopener');
+          button.addEventListener('click', (event) => {
+            event.preventDefault();
+            openPreviewResource(resolvedPreview);
           });
         } else {
           button.classList.add('context-source--disabled');
@@ -668,6 +660,53 @@
 
       details.appendChild(list);
       wrapper.appendChild(details);
+    }
+
+    async function openPreviewResource(previewTarget) {
+      if (!previewTarget) {
+        return;
+      }
+      const previewWindow = global.open('', '_blank', 'noopener');
+      try {
+        const previewUrl = new URL(previewTarget, global.location.origin);
+        const sameOrigin = previewUrl.origin === global.location.origin;
+        if (!sameOrigin) {
+          if (previewWindow) {
+            previewWindow.location.replace(previewUrl.toString());
+          } else {
+            global.open(previewUrl.toString(), '_blank', 'noopener');
+          }
+          return;
+        }
+
+        const response = await global.fetch(
+          previewUrl.toString(),
+          utils.withAuth({ method: 'GET' }),
+        );
+        if (!response.ok) {
+          throw new Error(`Preview request failed with status ${response.status}`);
+        }
+        const blob = await response.blob();
+        const objectUrl = global.URL.createObjectURL(blob);
+        const targetWindow = previewWindow ?? global.open('', '_blank', 'noopener');
+        if (targetWindow) {
+          targetWindow.location.replace(objectUrl);
+          const cleanup = () => {
+            global.URL.revokeObjectURL(objectUrl);
+          };
+          targetWindow.addEventListener('beforeunload', cleanup, { once: true });
+          global.setTimeout(cleanup, 60_000);
+        } else {
+          global.URL.revokeObjectURL(objectUrl);
+          throw new Error('Browser blocked the preview window.');
+        }
+      } catch (error) {
+        if (previewWindow) {
+          previewWindow.close();
+        }
+        console.error('Failed to open preview', error);
+        global.alert('Unable to open the cited document preview. Please check your permissions.');
+      }
     }
 
     async function streamChatResponse(conversationId, query, assistantMessage) {
@@ -687,6 +726,15 @@
       let pendingRenderUsesTimeout = false;
       let streamingActive = true;
 
+      const commitStreamingRender = () => {
+        pendingRender = null;
+        if (!streamingActive) {
+          return;
+        }
+        contentElement.textContent = assistantText;
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+      };
+
       const cancelScheduledRender = () => {
         if (pendingRender == null) {
           return;
@@ -699,28 +747,23 @@
         pendingRender = null;
       };
 
-      const scheduleStreamingRender = () => {
-        if (!streamingActive || pendingRender != null) {
+      const scheduleStreamingRender = (immediate = false) => {
+        if (!streamingActive) {
+          return;
+        }
+        if (immediate) {
+          commitStreamingRender();
+          return;
+        }
+        if (pendingRender != null) {
           return;
         }
         if (raf) {
-          pendingRender = raf(() => {
-            pendingRender = null;
-            if (!streamingActive) {
-              return;
-            }
-            contentElement.textContent = assistantText;
-          });
           pendingRenderUsesTimeout = false;
+          pendingRender = raf(commitStreamingRender);
         } else {
           pendingRenderUsesTimeout = true;
-          pendingRender = global.setTimeout(() => {
-            pendingRender = null;
-            if (!streamingActive) {
-              return;
-            }
-            contentElement.textContent = assistantText;
-          }, 16);
+          pendingRender = global.setTimeout(commitStreamingRender, 16);
         }
       };
 
@@ -739,11 +782,8 @@
           const text = typeof event.text === 'string' ? event.text : '';
           assistantText += text;
           streamState = 'streaming';
-          if (assistantText.length === text.length) {
-            contentElement.textContent = assistantText;
-          }
           streamingActive = true;
-          scheduleStreamingRender();
+          scheduleStreamingRender(assistantText.length === text.length);
         } else if (type === 'status' && typeof event.message === 'string') {
           streamStatus.textContent = event.message;
         } else if (type === 'context' && Array.isArray(event.chunks)) {
@@ -767,6 +807,7 @@
           contentElement.innerHTML = finalText
             ? renderMarkdown(finalText)
             : '<p>No response generated.</p>';
+          chatWindow.scrollTop = chatWindow.scrollHeight;
           renderContextSources(assistantMessage, contextChunks, citationItems);
         }
       };
