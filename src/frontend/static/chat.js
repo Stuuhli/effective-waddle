@@ -220,6 +220,13 @@
     }
 
     function stopStreaming(nextState) {
+      if (activeStream?.cancelRender && typeof activeStream.cancelRender === 'function') {
+        try {
+          activeStream.cancelRender();
+        } catch (error) {
+          console.warn('Failed to cancel render', error);
+        }
+      }
       if (activeStream?.controller) {
         activeStream.controller.abort();
       }
@@ -674,7 +681,55 @@
       let contextChunks = [];
       let citationItems = [];
       let streamState = 'idle';
-      activeStream = { controller, message: assistantMessage };
+      const raf = global.requestAnimationFrame?.bind(global) ?? null;
+      const caf = global.cancelAnimationFrame?.bind(global) ?? null;
+      let pendingRender = null;
+      let pendingRenderUsesTimeout = false;
+      let streamingActive = true;
+
+      const cancelScheduledRender = () => {
+        if (pendingRender == null) {
+          return;
+        }
+        if (pendingRenderUsesTimeout) {
+          global.clearTimeout(pendingRender);
+        } else if (caf) {
+          caf(pendingRender);
+        }
+        pendingRender = null;
+      };
+
+      const scheduleStreamingRender = () => {
+        if (!streamingActive || pendingRender != null) {
+          return;
+        }
+        if (raf) {
+          pendingRender = raf(() => {
+            pendingRender = null;
+            if (!streamingActive) {
+              return;
+            }
+            contentElement.textContent = assistantText;
+          });
+          pendingRenderUsesTimeout = false;
+        } else {
+          pendingRenderUsesTimeout = true;
+          pendingRender = global.setTimeout(() => {
+            pendingRender = null;
+            if (!streamingActive) {
+              return;
+            }
+            contentElement.textContent = assistantText;
+          }, 16);
+        }
+      };
+
+      const stopStreamingRender = () => {
+        streamingActive = false;
+        cancelScheduledRender();
+      };
+
+      activeStream = { controller, message: assistantMessage, cancelRender: stopStreamingRender };
       setStreamingState('streaming');
       contentElement.innerHTML = '<p class="message__placeholder">Generating response…</p>';
 
@@ -683,8 +738,12 @@
         if (type === 'token') {
           const text = typeof event.text === 'string' ? event.text : '';
           assistantText += text;
-          const parsed = renderMarkdown(assistantText);
-          contentElement.innerHTML = parsed || escapeHtml(assistantText) || '<p></p>';
+          streamState = 'streaming';
+          if (assistantText.length === text.length) {
+            contentElement.textContent = assistantText;
+          }
+          streamingActive = true;
+          scheduleStreamingRender();
         } else if (type === 'status' && typeof event.message === 'string') {
           streamStatus.textContent = event.message;
         } else if (type === 'context' && Array.isArray(event.chunks)) {
@@ -697,10 +756,12 @@
             typeof event.message === 'string'
               ? event.message
               : 'The assistant encountered an error.';
+          stopStreamingRender();
           contentElement.textContent = message;
           streamState = 'stopped';
           controller.abort();
         } else if (type === 'done') {
+          stopStreamingRender();
           streamState = 'idle';
           const finalText = assistantText.trim();
           contentElement.innerHTML = finalText
@@ -747,6 +808,7 @@
             }
           }
         }
+        buffer += decoder.decode();
         const finalChunk = buffer.trim();
         if (finalChunk) {
           try {
@@ -757,6 +819,7 @@
           }
         }
       } catch (error) {
+        stopStreamingRender();
         if (controller.signal.aborted) {
           streamState = 'stopped';
           const current = contentElement.textContent?.trim();
@@ -774,6 +837,7 @@
         if (activeStream && activeStream.controller === controller) {
           activeStream = null;
         }
+        stopStreamingRender();
         setStreamingState(streamState);
         await refreshConversations(conversationId);
       }
