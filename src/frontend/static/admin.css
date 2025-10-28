@@ -74,6 +74,37 @@
   gap: 1.25rem;
 }
 
+.admin-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.admin-card__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.admin-card__actions .button {
+  padding: 0.35rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+.button--compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  line-height: 1.1;
+}
+
+.button--compact svg {
+  width: 16px;
+  height: 16px;
+}
+
 .admin-card__header h3 {
   margin: 0;
   font-size: 1.05rem;
@@ -121,6 +152,7 @@
 .admin-table td {
   font-size: 0.95rem;
   color: rgba(255, 255, 255, 0.88);
+  vertical-align: middle;
 }
 
 .admin-table__empty {
@@ -439,6 +471,88 @@
   border-radius: 12px;
   border: 1px dashed rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.05);
+}
+
+.admin-dialog {
+  border: none;
+  border-radius: 18px;
+  padding: 0;
+  background: rgba(8, 7, 16, 0.96);
+  color: rgba(255, 255, 255, 0.92);
+  min-width: min(420px, 90vw);
+}
+
+.admin-dialog[open] {
+  display: block;
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  width: min(440px, calc(100vw - 2.5rem));
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  z-index: 1100;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+}
+
+.admin-dialog::backdrop {
+  background: rgba(2, 4, 12, 0.6);
+}
+
+.admin-dialog[data-dialog-fallback='true']::backdrop {
+  display: none;
+}
+
+.admin-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 4, 12, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 1090;
+}
+
+.admin-dialog__overlay[hidden] {
+  display: none;
+}
+
+body.admin-dialog-fallback-open {
+  overflow: hidden;
+}
+
+.admin-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.75rem;
+}
+
+.admin-dialog__content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.admin-dialog__content h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.admin-dialog__hint {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.admin-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.admin-dialog__actions .button {
+  min-width: 120px;
 }
 
 .admin-form__checkbox input[type='checkbox'] {

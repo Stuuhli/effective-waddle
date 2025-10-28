@@ -16,8 +16,10 @@ from .schemas import (
     RoleCreate,
     RoleResponse,
     UserAdminResponse,
+    UserCreate,
     UserRoleUpdate,
     UserStatusUpdate,
+    UserUpdate,
 )
 from .service import AdminService
 
@@ -52,6 +54,35 @@ async def create_role(payload: RoleCreate, service: AdminService = Depends(get_a
 @router.post("/roles/assign", response_model=UserAdminResponse)
 async def assign_role(payload: RoleAssignment, service: AdminService = Depends(get_admin_service)) -> UserAdminResponse:
     user = await service.assign_role(payload)
+    return UserAdminResponse(
+        id=user.id,
+        email=user.email,
+        roles=[role.name for role in user.roles],
+        is_active=user.is_active,
+    )
+
+
+@router.post("/users", response_model=UserAdminResponse, status_code=201)
+async def create_user(
+    payload: UserCreate,
+    service: AdminService = Depends(get_admin_service),
+) -> UserAdminResponse:
+    user = await service.create_user(payload)
+    return UserAdminResponse(
+        id=user.id,
+        email=user.email,
+        roles=[role.name for role in user.roles],
+        is_active=user.is_active,
+    )
+
+
+@router.patch("/users/{user_id}", response_model=UserAdminResponse)
+async def update_user(
+    user_id: str,
+    payload: UserUpdate,
+    service: AdminService = Depends(get_admin_service),
+) -> UserAdminResponse:
+    user = await service.update_user(user_id, payload)
     return UserAdminResponse(
         id=user.id,
         email=user.email,

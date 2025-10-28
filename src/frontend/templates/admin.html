@@ -35,9 +35,14 @@
         </header>
         <div class="panel-content">
           <section class="admin-card" aria-labelledby="user-table-heading" data-equal-row="row-1">
-            <div class="admin-card__header">
-              <h3 id="user-table-heading">Current users</h3>
-              <p>Users inherit features from the roles shown below.</p>
+            <div class="admin-card__header" style="display: flex; justify-content: space-between;">
+              <div>
+                <h3 id="user-table-heading">Current users</h3>
+                <p>Users inherit features from the roles shown below.</p>
+              </div>
+              <div class="admin-card__actions">
+                <button class="button button--ghost" type="button" id="open-user-dialog">Add user</button>
+              </div>
             </div>
             <div class="table-scroll">
               <table class="admin-table" id="user-table">
@@ -57,6 +62,29 @@
               </table>
             </div>
           </section>
+          <dialog id="user-editor-dialog" class="admin-dialog" aria-labelledby="user-dialog-title" hidden>
+            <form class="admin-dialog__form admin-form" id="user-editor-form" novalidate>
+              <div class="admin-dialog__content">
+                <h3 id="user-dialog-title">Create user</h3>
+                <input type="hidden" id="user-dialog-id" name="user-id" />
+                <label class="admin-form__field" for="user-dialog-email">
+                  <span>Email</span>
+                  <input type="email" id="user-dialog-email" name="email" placeholder="user@example.com" autocomplete="email" required />
+                </label>
+                <label class="admin-form__field" for="user-dialog-password">
+                  <span>Password</span>
+                  <input type="password" id="user-dialog-password" name="password" placeholder="At least 8 characters" autocomplete="new-password" required />
+                </label>
+                <p class="admin-dialog__hint" id="user-dialog-hint">Assign roles after creating the user.</p>
+                <p class="form-status" id="user-dialog-status" role="status" aria-live="polite"></p>
+              </div>
+              <div class="admin-dialog__actions">
+                <button class="button button--ghost" type="button" id="cancel-user-dialog">Cancel</button>
+                <button class="button button--primary" type="submit" id="user-dialog-submit">Create user</button>
+              </div>
+            </form>
+          </dialog>
+          <div class="admin-dialog__overlay" id="user-dialog-overlay" hidden></div>
 
           <form class="admin-form" id="user-role-form" data-equal-row="row-2">
             <fieldset class="admin-form__fieldset">

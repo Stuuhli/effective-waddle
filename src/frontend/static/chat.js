@@ -19,6 +19,7 @@
     const sendButton = document.getElementById('send-button');
     const conversationList = document.getElementById('conversation-list');
     const newConversationButton = document.getElementById('new-conversation');
+    const logoutButton = document.getElementById('logout-button');
 
     const fullscreenToggle = document.getElementById('fullscreen-toggle');
     const fullscreenEnterIcon = fullscreenToggle?.querySelector('.fullscreen-toggle__icon--enter');
@@ -157,6 +158,10 @@
       } else {
         closeSidebar();
       }
+    });
+
+    logoutButton?.addEventListener('click', () => {
+      utils.redirectToLogin();
     });
 
     fullscreenToggle?.addEventListener('click', () => {

@@ -4,9 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
 from ..infrastructure.database import RoleCategory
+
+
+PasswordField = Field(min_length=8, description="Password must be at least 8 characters long.")
 
 
 class RoleCreate(BaseModel):
@@ -17,6 +20,16 @@ class RoleCreate(BaseModel):
 class RoleAssignment(BaseModel):
     user_id: str
     role_name: str
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str = PasswordField
+
+
+class UserUpdate(BaseModel):
+    email: EmailStr | None = None
+    password: str | None = Field(default=None, min_length=8)
 
 
 class UserAdminResponse(BaseModel):
@@ -62,10 +75,9 @@ class CollectionAdminResponse(BaseModel):
     description: str | None = None
     roles: list[str]
     document_count: int
-    
-    
-class GraphRAGCommandBase(BaseModel):
 
+
+class GraphRAGCommandBase(BaseModel):
     root: Path | None = None
     config: Path | None = None
     verbose: bool | None = None
@@ -91,6 +103,8 @@ class GraphRAGCommandResponse(BaseModel):
 __all__ = [
     "RoleCreate",
     "RoleAssignment",
+    "UserCreate",
+    "UserUpdate",
     "UserAdminResponse",
     "FeatureFlagUpdate",
     "RoleResponse",

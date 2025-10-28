@@ -125,6 +125,18 @@
       refreshCollections: document.getElementById('refresh-collections'),
       resetUserForm: document.getElementById('reset-user-form'),
       resetCollectionForm: document.getElementById('reset-collection-form'),
+      openUserDialog: document.getElementById('open-user-dialog'),
+      userDialog: document.getElementById('user-editor-dialog'),
+      userDialogForm: document.getElementById('user-editor-form'),
+      userDialogId: document.getElementById('user-dialog-id'),
+      userDialogEmail: document.getElementById('user-dialog-email'),
+      userDialogPassword: document.getElementById('user-dialog-password'),
+      userDialogHint: document.getElementById('user-dialog-hint'),
+      userDialogStatus: document.getElementById('user-dialog-status'),
+      userDialogSubmit: document.getElementById('user-dialog-submit'),
+      userDialogTitle: document.getElementById('user-dialog-title'),
+      cancelUserDialog: document.getElementById('cancel-user-dialog'),
+      userDialogOverlay: document.getElementById('user-dialog-overlay'),
       graphragPromptForm: document.getElementById('graphrag-prompt-form'),
       graphragPromptStatus: document.getElementById('graphrag-prompt-status'),
       graphragPromptOutput: document.getElementById('graphrag-prompt-output'),
@@ -160,9 +172,15 @@
       [ROLE_CATEGORIES.PERMISSION]: 'Permissions',
       [ROLE_CATEGORIES.WORKSPACE]: 'Workspaces',
     };
+    const EXCLUSIVE_ROLE_GROUPS = Object.freeze([
+      ['admin', 'user'],
+      ['graphrag', 'rag'],
+    ]);
     const ICONS = Object.freeze({
       toggle:
         '<svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor"><path d="M538-538ZM424-424Zm56 264q51 0 98-15.5t88-44.5q-41-29-88-44.5T480-280q-51 0-98 15.5T294-220q41 29 88 44.5t98 15.5Zm106-328-57-57q5-8 8-17t3-18q0-25-17.5-42.5T480-640q-9 0-18 3t-17 8l-57-57q19-17 42.5-25.5T480-720q58 0 99 41t41 99q0 26-8.5 49.5T586-488Zm228 228-58-58q22-37 33-78t11-84q0-134-93-227t-227-93q-43 0-84 11t-78 33l-58-58q49-32 105-49t115-17q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 59-17 115t-49 105ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-59 16.5-115T145-701L27-820l57-57L876-85l-57 57-615-614q-22 37-33 78t-11 84q0 57 19 109t55 95q54-41 116.5-62.5T480-360q38 0 76 8t74 22l133 133q-57 57-130 87T480-80Z"/></svg>',
+      edit:
+        '<svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor"><path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"/></svg>',
       delete:
         '<svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>',
     });
@@ -172,6 +190,11 @@
       users: [],
       roles: [],
       collections: [],
+    };
+
+    const dialogState = {
+      mode: 'create',
+      userId: '',
     };
 
     function setStatus(element, message, variant) {
@@ -186,6 +209,154 @@
         element.classList.add('form-status--success');
       }
       scheduleEqualRowHeights();
+    }
+
+    function enforceExclusiveRoleSelection(container, statusElement, options = {}) {
+      if (!container) {
+        return;
+      }
+      const silent = Boolean(options.silent);
+      EXCLUSIVE_ROLE_GROUPS.forEach((group) => {
+        const checked = group
+          .map((role) =>
+            container.querySelector(`input[type="checkbox"][value="${role}"]`),
+          )
+          .filter((input) => input instanceof HTMLInputElement && input.checked);
+        if (checked.length <= 1) {
+          return;
+        }
+        const keep = group.find((role) => {
+          const input = container.querySelector(`input[type="checkbox"][value="${role}"]`);
+          return input instanceof HTMLInputElement && input.checked;
+        });
+        checked.forEach((input) => {
+          if (!keep || input.value !== keep) {
+            input.checked = false;
+          }
+        });
+        if (!silent && statusElement) {
+          setStatus(
+            statusElement,
+            `You can assign only one of ${group.join(' / ')} at a time.`,
+            'error',
+          );
+        }
+      });
+    }
+
+    function resetUserDialog() {
+      dialogState.mode = 'create';
+      dialogState.userId = '';
+      if (elements.userDialogForm instanceof HTMLFormElement) {
+        elements.userDialogForm.reset();
+      }
+      if (elements.userDialogTitle) {
+        elements.userDialogTitle.textContent = 'Create user';
+      }
+      if (elements.userDialogSubmit) {
+        elements.userDialogSubmit.textContent = 'Create user';
+        elements.userDialogSubmit.disabled = false;
+      }
+      if (elements.userDialogHint) {
+        elements.userDialogHint.textContent = 'Assign roles after creating the user.';
+      }
+      if (elements.userDialogPassword) {
+        elements.userDialogPassword.required = true;
+        elements.userDialogPassword.placeholder = 'At least 8 characters';
+        elements.userDialogPassword.value = '';
+        elements.userDialogPassword.autocomplete = 'new-password';
+      }
+      if (elements.userDialogEmail) {
+        elements.userDialogEmail.value = '';
+      }
+      if (elements.userDialogId) {
+        elements.userDialogId.value = '';
+      }
+      if (elements.userDialogStatus) {
+        setStatus(elements.userDialogStatus, '', null);
+      }
+    }
+
+    function teardownUserDialog() {
+      if (elements.userDialog) {
+        elements.userDialog.removeAttribute('open');
+        elements.userDialog.setAttribute('hidden', 'true');
+        delete elements.userDialog.dataset.dialogFallback;
+        elements.userDialog.removeAttribute('data-dialog-fallback');
+      }
+      elements.userDialogOverlay?.setAttribute('hidden', 'true');
+      document.body.classList.remove('admin-dialog-fallback-open');
+    }
+
+    function openDialogFallback() {
+      if (!elements.userDialog) {
+        return;
+      }
+      elements.userDialog.dataset.dialogFallback = 'true';
+      elements.userDialog.setAttribute('open', '');
+      elements.userDialogOverlay?.removeAttribute('hidden');
+      document.body.classList.add('admin-dialog-fallback-open');
+    }
+
+    function openUserDialog(mode, user) {
+      if (!elements.userDialog) {
+        return;
+      }
+      resetUserDialog();
+      elements.userDialog.removeAttribute('hidden');
+      dialogState.mode = mode;
+      dialogState.userId = (user && user.id) || '';
+      if (mode === 'edit' && user) {
+        if (elements.userDialogTitle) {
+          elements.userDialogTitle.textContent = `Edit ${user.email}`;
+        }
+        if (elements.userDialogSubmit) {
+          elements.userDialogSubmit.textContent = 'Save changes';
+          elements.userDialogSubmit.disabled = false;
+        }
+        if (elements.userDialogHint) {
+          elements.userDialogHint.textContent =
+            'Update the email or set a new password to replace the current one.';
+        }
+        if (elements.userDialogEmail) {
+          elements.userDialogEmail.value = user.email;
+        }
+        if (elements.userDialogPassword) {
+          elements.userDialogPassword.required = false;
+          elements.userDialogPassword.placeholder = 'Leave blank to keep current password';
+          elements.userDialogPassword.value = '';
+        }
+        if (elements.userDialogId) {
+          elements.userDialogId.value = user.id;
+        }
+      }
+      elements.userDialog.removeAttribute('hidden');
+      if (typeof elements.userDialog.showModal === 'function') {
+        try {
+          elements.userDialog.showModal();
+        } catch (error) {
+          console.error('Unable to open dialog', error);
+          openDialogFallback();
+        }
+      } else {
+        openDialogFallback();
+      }
+      elements.userDialogEmail?.focus();
+    }
+
+    function closeUserDialog() {
+      if (!elements.userDialog) {
+        return;
+      }
+      const fallback = elements.userDialog.dataset.dialogFallback === 'true';
+      if (!fallback && typeof elements.userDialog.close === 'function') {
+        if (elements.userDialog.open) {
+          elements.userDialog.close();
+        }
+      } else {
+        teardownUserDialog();
+        resetUserDialog();
+      }
     }
 
     function escapeHtml(value) {
@@ -503,6 +674,16 @@
         const actionsWrapper = document.createElement('div');
         actionsWrapper.className = 'table-cell table-cell--end';
 
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'button button--ghost button--compact';
+        editButton.dataset.userAction = 'edit';
+        editButton.dataset.userId = user.id;
+        editButton.setAttribute('aria-label', `Edit ${user.email}`);
+        editButton.title = `Edit ${user.email}`;
+        editButton.innerHTML = `${ICONS.edit}<span>Edit</span>`;
+        actionsWrapper.appendChild(editButton);
+
         const deleteButton = document.createElement('button');
         deleteButton.type = 'button';
         deleteButton.className = 'icon-button icon-button--danger';
@@ -641,6 +822,9 @@
         showEmptyGroups: true,
         workspaceHint: 'Create a workspace role below to assign documents.',
       });
+      enforceExclusiveRoleSelection(elements.userRoleOptions, elements.userRoleStatus, {
+        silent: true,
+      });
     }
 
     function updateCollectionRoleOptions() {
@@ -672,6 +856,46 @@
         return [];
       }
       return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map((input) => input.value);
+    }
+
+    function onUserRoleOptionChange(event) {
+      if (!elements.userRoleOptions) {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') {
+        return;
+      }
+      const statusElement = elements.userRoleStatus;
+      setStatus(statusElement, '', null);
+      if (!target.checked) {
+        return;
+      }
+      let conflictGroup = '';
+      EXCLUSIVE_ROLE_GROUPS.forEach((group) => {
+        if (!group.includes(target.value)) {
+          return;
+        }
+        group.forEach((role) => {
+          if (role === target.value) {
+            return;
+          }
+          const input = elements.userRoleOptions.querySelector(
+            `input[type="checkbox"][value="${role}"]`,
+          );
+          if (input instanceof HTMLInputElement && input.checked) {
+            input.checked = false;
+            conflictGroup = group.join(' / ');
+          }
+        });
+      });
+      if (conflictGroup && statusElement) {
+        setStatus(
+          statusElement,
+          `You can assign only one of ${conflictGroup} at a time.`,
+          'error',
+        );
+      }
     }
 
     function findUser(userId) {
@@ -805,6 +1029,8 @@
       }
       if (action === 'toggle-status') {
         handleUserStatusToggle(user);
+      } else if (action === 'edit') {
+        openUserDialog('edit', user);
       } else if (action === 'delete') {
         handleUserDeletion(user);
       }
@@ -889,6 +1115,7 @@
 
     elements.userTableBody?.addEventListener('click', onUserTableClick);
     elements.collectionTableBody?.addEventListener('click', onCollectionTableClick);
+    elements.userRoleOptions?.addEventListener('change', onUserRoleOptionChange);
 
     elements.userSelect?.addEventListener('change', () => {
       updateUserRoleOptions();
@@ -898,6 +1125,134 @@
     elements.collectionSelect?.addEventListener('change', () => {
       updateCollectionRoleOptions();
       setStatus(elements.collectionRoleStatus, '', null);
+    });
+
+    elements.openUserDialog?.addEventListener('click', () => openUserDialog('create'));
+    elements.cancelUserDialog?.addEventListener('click', () => closeUserDialog());
+    elements.userDialog?.addEventListener('close', () => {
+      teardownUserDialog();
+      resetUserDialog();
+    });
+    elements.userDialogOverlay?.addEventListener('click', () => closeUserDialog());
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && elements.userDialog?.dataset.dialogFallback === 'true') {
+        event.preventDefault();
+        closeUserDialog();
+      }
+    });
+    elements.userDialogForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const emailInput = elements.userDialogEmail;
+      const passwordInput = elements.userDialogPassword;
+      const statusElement = elements.userDialogStatus;
+      if (!emailInput) {
+        return;
+      }
+      const rawEmail = emailInput.value.trim();
+      if (!rawEmail) {
+        setStatus(statusElement, 'Email is required.', 'error');
+        emailInput.focus();
+        return;
+      }
+      const email = rawEmail.toLowerCase();
+      emailInput.value = email;
+      const passwordValue = passwordInput ? passwordInput.value : '';
+      if (dialogState.mode === 'create' && (!passwordValue || passwordValue.length < 8)) {
+        setStatus(statusElement, 'Password must be at least 8 characters.', 'error');
+        passwordInput?.focus();
+        return;
+      }
+      if (dialogState.mode === 'edit') {
+        const existing = findUser(dialogState.userId);
+        if (!existing) {
+          setStatus(statusElement, 'User not found.', 'error');
+          return;
+        }
+        const unchangedEmail = email === existing.email.toLowerCase();
+        if (unchangedEmail && !passwordValue) {
+          setStatus(
+            statusElement,
+            'Update the email or provide a new password to save changes.',
+            'error',
+          );
+          return;
+        }
+      }
+
+      const payload = { email };
+      if (passwordValue) {
+        payload.password = passwordValue;
+      }
+
+      const submitButton = elements.userDialogSubmit;
+      submitButton?.setAttribute('disabled', 'true');
+      setStatus(statusElement, 'Saving...', null);
+
+      try {
+        const endpoint =
+          dialogState.mode === 'edit'
+            ? `/admin/users/${dialogState.userId}`
+            : '/admin/users';
+        const response = await fetch(
+          endpoint,
+          utils.withAuth({
+            method: dialogState.mode === 'edit' ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }),
+        );
+        const isJson = response.headers.get('Content-Type')?.includes('application/json');
+        const data = isJson ? await response.json() : null;
+        if (!response.ok || !data) {
+          const defaultMessage =
+            dialogState.mode === 'edit' ? 'Unable to update user.' : 'Unable to create user.';
+          let detail = defaultMessage;
+          if (data) {
+            if (typeof data.detail === 'string') {
+              detail = data.detail;
+            } else if (Array.isArray(data.detail) && data.detail.length) {
+              const first = data.detail[0];
+              if (first && typeof first.msg === 'string') {
+                detail = first.msg;
+              }
+            }
+          }
+          setStatus(statusElement, detail, 'error');
+          return;
+        }
+        if (dialogState.mode === 'create') {
+          state.users.push(data);
+        } else {
+          const index = state.users.findIndex((item) => item.id === data.id);
+          if (index >= 0) {
+            state.users[index] = data;
+          } else {
+            state.users.push(data);
+          }
+        }
+        state.users.sort((a, b) => a.email.localeCompare(b.email));
+        renderUsers();
+        renderUserSelect();
+        if (dialogState.mode === 'create' && elements.userSelect) {
+          elements.userSelect.value = data.id;
+          updateUserRoleOptions();
+        }
+        const successMessage =
+          dialogState.mode === 'create'
+            ? `Created ${data.email}.`
+            : `Updated ${data.email}.`;
+        setStatus(elements.userRoleStatus, successMessage, 'success');
+        closeUserDialog();
+      } catch (error) {
+        console.error(error);
+        const fallback =
+          dialogState.mode === 'edit'
+            ? 'Unable to update user.'
+            : 'Unable to create user.';
+        setStatus(statusElement, fallback, 'error');
+      } finally {
+        submitButton?.removeAttribute('disabled');
+      }
     });
 
     elements.resetUserForm?.addEventListener('click', () => {

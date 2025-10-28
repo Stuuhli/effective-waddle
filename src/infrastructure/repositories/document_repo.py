@@ -181,17 +181,12 @@ class DocumentRepository(AsyncRepository[Document]):
         return collection
 
     async def assign_collection_to_role(self, collection: Collection, role: Role) -> None:
-        if role.category is not RoleCategory.workspace:
-            raise ValueError("Only workspace roles can be assigned to collections")
         if role in collection.roles:
             return
         collection.roles.append(role)
         await self.session.flush()
 
     async def set_collection_roles(self, collection: Collection, roles: Sequence[Role]) -> None:
-        for role in roles:
-            if role.category is not RoleCategory.workspace:
-                raise ValueError("Only workspace roles can be assigned to collections")
         collection.roles = list(roles)
         await self.session.flush()
 

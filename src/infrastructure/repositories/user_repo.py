@@ -98,7 +98,8 @@ class UserRepository(AsyncRepository[User]):
         return result.scalar_one_or_none()
 
     async def list_roles(self) -> list[Role]:
-        result = await self.session.execute(select(Role).order_by(Role.category, Role.name))
+        stmt = select(Role).order_by(Role.created_at.desc())
+        result = await self.session.execute(stmt)
         return list(result.scalars())
 
     async def ensure_role(

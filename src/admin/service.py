@@ -5,12 +5,13 @@ import asyncio
 import shlex
 import sys
 from asyncio.subprocess import PIPE, Process
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 
+import bcrypt
 from fastapi import HTTPException, status
 
-from ..auth.constants import GRAPH_RAG_ROLE_NAME, PERMISSION_ROLE_NAMES, RAG_ROLE_NAME
+from ..auth.constants import GRAPH_RAG_ROLE_NAME, PERMISSION_ROLE_NAMES, RAG_ROLE_NAME, ROLE_EXCLUSIVE_GROUPS
 from ..config import Settings, load_settings
 from ..infrastructure.database import RoleCategory
 from ..infrastructure.repositories.document_repo import DocumentRepository
@@ -26,7 +27,9 @@ from .schemas import (
     RoleAssignment,
     RoleCreate,
     RoleResponse,
+    UserCreate,
     UserRoleUpdate,
+    UserUpdate,
 )
 
 
@@ -186,19 +189,20 @@ class AdminService:
                 if name in PERMISSION_ROLE_NAMES
                 else RoleCategory.workspace
             )
-            if workspace_only and category is not RoleCategory.workspace:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Only workspace roles can be used for collections.",
-                )
             role = await self.user_repo.ensure_role(name, category=category)
-            if workspace_only and role.category is not RoleCategory.workspace:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Only workspace roles can be used for collections.",
-                )
             resolved.append(role)
         return resolved
+
+    @staticmethod
+    def _validate_exclusive_roles(role_names: Iterable[str]) -> None:
+        selected = {name.lower() for name in role_names}
+        for group in ROLE_EXCLUSIVE_GROUPS:
+            group_lower = {role.lower() for role in group}
+            if len(selected & group_lower) > 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Roles {', '.join(group)} cannot be assigned together.",
+                )
 
 
     async def assign_role(self, payload: RoleAssignment):
@@ -219,6 +223,7 @@ class AdminService:
         user = await self.user_repo.get(user_id)
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        self._validate_exclusive_roles(payload.role_names)
         roles = await self._resolve_roles(list(payload.role_names))
         await self.user_repo.set_user_roles(user, roles)
         await self.user_repo.session.refresh(user)
@@ -249,11 +254,7 @@ class AdminService:
                 id=collection.id,
                 name=collection.name,
                 description=collection.description,
-                roles=[
-                    role.name
-                    for role in collection.roles
-                    if role.category is RoleCategory.workspace
-                ],
+                roles=[role.name for role in collection.roles],
                 document_count=counts.get(collection.id, 0),
             )
             for collection in collections
@@ -266,7 +267,7 @@ class AdminService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Collection already exists")
 
         collection = await self.document_repo.create_collection(payload.name, payload.description)
-        roles = await self._resolve_roles(list(payload.role_names), workspace_only=True)
+        roles = await self._resolve_roles(list(payload.role_names))
         if roles:
             await self.document_repo.set_collection_roles(collection, roles)
         await self.document_repo.commit()
@@ -275,7 +276,7 @@ class AdminService:
             id=collection.id,
             name=collection.name,
             description=collection.description,
-            roles=[role.name for role in collection.roles if role.category is RoleCategory.workspace],
+            roles=[role.name for role in collection.roles],
             document_count=0,
         )
 
@@ -284,7 +285,7 @@ class AdminService:
         collection = await self.document_repo.get_collection(collection_id)
         if collection is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found")
-        roles = await self._resolve_roles(list(payload.role_names), workspace_only=True)
+        roles = await self._resolve_roles(list(payload.role_names))
         await self.document_repo.set_collection_roles(collection, roles)
         await self.document_repo.commit()
         await self.document_repo.session.refresh(collection)
@@ -293,7 +294,7 @@ class AdminService:
             id=collection.id,
             name=collection.name,
             description=collection.description,
-            roles=[role.name for role in collection.roles if role.category is RoleCategory.workspace],
+            roles=[role.name for role in collection.roles],
             document_count=counts.get(collection.id, 0),
         )
 
@@ -323,6 +324,49 @@ class AdminService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found")
         await self.document_repo.delete(collection)
         await self.document_repo.commit()
+
+    @staticmethod
+    def _hash_password(password: str) -> str:
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+    async def create_user(self, payload: UserCreate):
+        email = payload.email.lower()
+        existing = await self.user_repo.get_by_email(email)
+        if existing:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
+        user = await self.user_repo.create_user(
+            email=email,
+            hashed_password=self._hash_password(payload.password),
+        )
+        return user
+
+    async def update_user(self, user_id: str, payload: UserUpdate):
+        user = await self.user_repo.get(user_id)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        updated = False
+
+        if payload.email is not None:
+            email = payload.email.lower()
+            existing = await self.user_repo.get_by_email(email)
+            if existing and existing.id != user.id:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
+            if user.email != email:
+                user.email = email
+                updated = True
+
+        if payload.password is not None:
+            user.hashed_password = self._hash_password(payload.password)
+            updated = True
+
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes provided")
+
+        await self.user_repo.session.flush()
+        await self.user_repo.commit()
+        await self.user_repo.session.refresh(user)
+        return user
 
 
 __all__ = ["AdminService"]
