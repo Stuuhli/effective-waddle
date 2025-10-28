@@ -220,6 +220,13 @@
     }
 
     function stopStreaming(nextState) {
+      if (activeStream?.cancelRender && typeof activeStream.cancelRender === 'function') {
+        try {
+          activeStream.cancelRender();
+        } catch (error) {
+          console.warn('Failed to cancel pending render', error);
+        }
+      }
       if (activeStream?.controller) {
         activeStream.controller.abort();
       }
@@ -638,17 +645,9 @@
         const resolvedPreview = previewUrl || fallbackUrl;
         if (resolvedPreview) {
           button.dataset.previewUrl = resolvedPreview;
-          button.addEventListener('click', () => {
-            const url = resolvedPreview.startsWith('http')
-              ? resolvedPreview
-              : resolvedPreview.startsWith('/')
-                ? resolvedPreview
-                : `${resolvedPreview}`;
-            const token = utils.getCookie('rag_token') || '';
-            const hasQuery = url.includes('?');
-            const separator = hasQuery ? '&' : '?';
-            const authedUrl = token ? `${url}${separator}token=${encodeURIComponent(token)}` : url;
-            window.open(authedUrl, '_blank', 'noopener');
+          button.addEventListener('click', (event) => {
+            event.preventDefault();
+            openPreviewResource(resolvedPreview);
           });
         } else {
           button.classList.add('context-source--disabled');
@@ -663,6 +662,53 @@
       wrapper.appendChild(details);
     }
 
+    async function openPreviewResource(previewTarget) {
+      if (!previewTarget) {
+        return;
+      }
+      const previewWindow = global.open('', '_blank', 'noopener');
+      try {
+        const previewUrl = new URL(previewTarget, global.location.origin);
+        const sameOrigin = previewUrl.origin === global.location.origin;
+        if (!sameOrigin) {
+          if (previewWindow) {
+            previewWindow.location.replace(previewUrl.toString());
+          } else {
+            global.open(previewUrl.toString(), '_blank', 'noopener');
+          }
+          return;
+        }
+
+        const response = await global.fetch(
+          previewUrl.toString(),
+          utils.withAuth({ method: 'GET' }),
+        );
+        if (!response.ok) {
+          throw new Error(`Preview request failed with status ${response.status}`);
+        }
+        const blob = await response.blob();
+        const objectUrl = global.URL.createObjectURL(blob);
+        const targetWindow = previewWindow ?? global.open('', '_blank', 'noopener');
+        if (targetWindow) {
+          targetWindow.location.replace(objectUrl);
+          const cleanup = () => {
+            global.URL.revokeObjectURL(objectUrl);
+          };
+          targetWindow.addEventListener('beforeunload', cleanup, { once: true });
+          global.setTimeout(cleanup, 60_000);
+        } else {
+          global.URL.revokeObjectURL(objectUrl);
+          throw new Error('Browser blocked the preview window.');
+        }
+      } catch (error) {
+        if (previewWindow) {
+          previewWindow.close();
+        }
+        console.error('Failed to open preview', error);
+        global.alert('Unable to open the cited document preview. Please check your permissions.');
+      }
+    }
+
     async function streamChatResponse(conversationId, query, assistantMessage) {
       const contentElement = assistantMessage.querySelector('.message__content');
       if (!contentElement) {
@@ -674,7 +720,59 @@
       let contextChunks = [];
       let citationItems = [];
       let streamState = 'idle';
-      activeStream = { controller, message: assistantMessage };
+      const raf = global.requestAnimationFrame?.bind(global) ?? null;
+      const caf = global.cancelAnimationFrame?.bind(global) ?? null;
+      let pendingRender = null;
+      let pendingRenderUsesTimeout = false;
+      let streamingActive = true;
+
+      const commitStreamingRender = () => {
+        pendingRender = null;
+        if (!streamingActive) {
+          return;
+        }
+        contentElement.textContent = assistantText;
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+      };
+
+      const cancelScheduledRender = () => {
+        if (pendingRender == null) {
+          return;
+        }
+        if (pendingRenderUsesTimeout) {
+          global.clearTimeout(pendingRender);
+        } else if (caf) {
+          caf(pendingRender);
+        }
+        pendingRender = null;
+      };
+
+      const scheduleStreamingRender = (immediate = false) => {
+        if (!streamingActive) {
+          return;
+        }
+        if (immediate) {
+          commitStreamingRender();
+          return;
+        }
+        if (pendingRender != null) {
+          return;
+        }
+        if (raf) {
+          pendingRenderUsesTimeout = false;
+          pendingRender = raf(commitStreamingRender);
+        } else {
+          pendingRenderUsesTimeout = true;
+          pendingRender = global.setTimeout(commitStreamingRender, 16);
+        }
+      };
+
+      const stopStreamingRender = () => {
+        streamingActive = false;
+        cancelScheduledRender();
+      };
+
+      activeStream = { controller, message: assistantMessage, cancelRender: stopStreamingRender };
       setStreamingState('streaming');
       contentElement.innerHTML = '<p class="message__placeholder">Generating response…</p>';
 
@@ -683,8 +781,9 @@
         if (type === 'token') {
           const text = typeof event.text === 'string' ? event.text : '';
           assistantText += text;
-          const parsed = renderMarkdown(assistantText);
-          contentElement.innerHTML = parsed || escapeHtml(assistantText) || '<p></p>';
+          streamState = 'streaming';
+          streamingActive = true;
+          scheduleStreamingRender(assistantText.length === text.length);
         } else if (type === 'status' && typeof event.message === 'string') {
           streamStatus.textContent = event.message;
         } else if (type === 'context' && Array.isArray(event.chunks)) {
@@ -697,15 +796,18 @@
             typeof event.message === 'string'
               ? event.message
               : 'The assistant encountered an error.';
+          stopStreamingRender();
           contentElement.textContent = message;
           streamState = 'stopped';
           controller.abort();
         } else if (type === 'done') {
+          stopStreamingRender();
           streamState = 'idle';
           const finalText = assistantText.trim();
           contentElement.innerHTML = finalText
             ? renderMarkdown(finalText)
             : '<p>No response generated.</p>';
+          chatWindow.scrollTop = chatWindow.scrollHeight;
           renderContextSources(assistantMessage, contextChunks, citationItems);
         }
       };
@@ -747,6 +849,7 @@
             }
           }
         }
+        buffer += decoder.decode();
         const finalChunk = buffer.trim();
         if (finalChunk) {
           try {
@@ -757,6 +860,7 @@
           }
         }
       } catch (error) {
+        stopStreamingRender();
         if (controller.signal.aborted) {
           streamState = 'stopped';
           const current = contentElement.textContent?.trim();
@@ -774,6 +878,7 @@
         if (activeStream && activeStream.controller === controller) {
           activeStream = null;
         }
+        stopStreamingRender();
         setStreamingState(streamState);
         await refreshConversations(conversationId);
       }
