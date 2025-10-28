@@ -18,6 +18,7 @@
     data-admin="{{ 'true' if (is_admin | default(false)) else 'false' }}"
     data-user-id="{{ current_user_id | default('') }}"
     data-user-email="{{ current_user_email | default('') }}"
+    data-user-roles="{{ (current_user_roles | default([])) | join(',') }}"
   >
     {% block body %}{% endblock %}
     <script defer src="{{ url_for('frontend_static', path='shared.js') }}"></script>

@@ -59,6 +59,7 @@ async def chat_page(
         "is_admin": is_admin,
         "current_user_id": user.id,
         "current_user_email": user.email,
+        "current_user_roles": [role.name for role in user.roles],
         "conversations": conversations,
     }
     return templates.TemplateResponse("chat.html", context)
@@ -98,6 +99,7 @@ async def ingestion_page(
         "is_admin": is_admin,
         "current_user_id": user.id,
         "current_user_email": user.email,
+        "current_user_roles": [role.name for role in user.roles],
         "collections": collections,
         "recent_jobs": recent_jobs,
         "chunk_defaults": {
@@ -121,6 +123,7 @@ async def admin_page(request: Request, user: User = Depends(_current_user_from_c
         "is_admin": is_admin,
         "current_user_id": user.id,
         "current_user_email": user.email,
+        "current_user_roles": [role.name for role in user.roles],
         "graphrag_settings": {
             "root": str(graphrag.root_dir),
             "config": str(graphrag.config_path) if graphrag.config_path else "",

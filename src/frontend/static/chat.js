@@ -86,12 +86,16 @@
         if (!response.ok) {
           throw new Error(`Failed with status ${response.status}`);
         }
+        conversationMeta.delete(conversationId);
         listItem.remove();
         ensureConversationPlaceholder();
         if (activeConversationId === conversationId) {
           activeConversationId = null;
-          appendMessage('system', 'Conversation deleted.');
+          stopStreaming('idle');
+          chatWindow.innerHTML = '';
+          appendMessage('system', 'Conversation deleted. Select or create a new session.');
         }
+        await refreshConversations();
       } catch (error) {
         console.error('Failed to delete conversation', error);
         appendMessage('system', 'Deleting the conversation failed. Please try again.');
@@ -172,8 +176,12 @@
       }
     });
 
-    let streamingInterval = null;
-    let streamBuffer = [];
+    const userRoles = (document.body.dataset.userRoles || '')
+      .split(',')
+      .map((role) => role.trim().toLowerCase())
+      .filter(Boolean);
+    const conversationMeta = new Map();
+    let activeStream = null;
 
     function setStreamingState(state) {
       const label = state === 'streaming' ? 'Streaming…' : state === 'stopped' ? 'Stopped' : 'Idle';
@@ -198,7 +206,12 @@
 
       const body = document.createElement('p');
       body.className = 'message__content';
-      body.textContent = text;
+      const content = text ?? '';
+      if (type === 'assistant' && content) {
+        body.innerHTML = renderMarkdown(content);
+      } else {
+        body.textContent = content;
+      }
 
       message.append(author, body);
       chatWindow.appendChild(message);
@@ -207,61 +220,606 @@
     }
 
     function stopStreaming(nextState) {
-      if (streamingInterval) {
-        global.clearInterval(streamingInterval);
-        streamingInterval = null;
+      if (activeStream?.controller) {
+        activeStream.controller.abort();
       }
+      activeStream = null;
       setStreamingState(nextState ?? 'stopped');
     }
 
-    function startMockStreaming(container) {
-      const placeholderTokens = [
-        'Generating response',
-        'Streaming chunk 1',
-        'Streaming chunk 2',
-        'Finalizing output',
-      ];
-      streamBuffer = [...placeholderTokens];
-      setStreamingState('streaming');
-
-      streamingInterval = global.setInterval(() => {
-        const token = streamBuffer.shift();
-        const messageContent = container.querySelector('.message__content');
-        if (!messageContent) {
-          stopStreaming('idle');
-          return;
-        }
-        if (!token) {
-          stopStreaming('idle');
-          messageContent.textContent = 'Streaming skeleton complete. Integrate LLM output here.';
-          return;
-        }
-        messageContent.textContent = token;
-      }, 1200);
-    }
-
-    chatForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const value = chatInput.value.trim();
-      if (!value) {
+    function setActiveConversationHighlight(conversationId) {
+      if (!conversationList) {
         return;
       }
-      appendMessage('user', value);
-      chatInput.value = '';
-      const assistant = appendMessage('assistant', 'Preparing to stream…');
-      startMockStreaming(assistant);
+      conversationList
+        .querySelectorAll('.conversation-list__button--active')
+        .forEach((active) => active.classList.remove('conversation-list__button--active'));
+      if (conversationId) {
+        const button = conversationList.querySelector(`button[data-id="${conversationId}"]`);
+        if (button) {
+          button.classList.add('conversation-list__button--active');
+        }
+      }
+    }
+
+    function populateConversationMetaFromDom() {
+      if (!conversationList) {
+        return;
+      }
+      conversationList.querySelectorAll('button[data-id]').forEach((button) => {
+        const id = button.dataset.id || '';
+        if (!id) {
+          return;
+        }
+        conversationMeta.set(id, {
+          id,
+          title:
+            button.dataset.title ||
+            button.querySelector('.conversation-list__title')?.textContent ||
+            '',
+          created_at: button.dataset.createdAt || null,
+        });
+      });
+      ensureConversationPlaceholder();
+    }
+
+    function determineChatMode() {
+      if (userRoles.includes('graphrag')) {
+        return 'graphrag';
+      }
+      return 'rag';
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatInlineMarkdown(text) {
+      let html = escapeHtml(text);
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/(^|\s)\*(.+?)\*(?=\s|$)/g, '$1<em>$2</em>');
+      html = html.replace(/\[(.+?)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+      return html;
+    }
+
+    function renderMarkdown(text) {
+      const lines = String(text ?? '')
+        .replace(/\r\n/g, '\n')
+        .split('\n');
+      const html = [];
+      let paragraph = [];
+      let listType = null;
+      let listItems = [];
+
+      function flushParagraph() {
+        if (!paragraph.length) {
+          return;
+        }
+        const paragraphText = paragraph.join(' ').trim();
+        if (paragraphText) {
+          html.push(`<p>${formatInlineMarkdown(paragraphText)}</p>`);
+        }
+        paragraph = [];
+      }
+
+      function flushList() {
+        if (!listType || !listItems.length) {
+          listType = null;
+          listItems = [];
+          return;
+        }
+        const items = listItems
+          .map((content) => `<li>${formatInlineMarkdown(content)}</li>`)
+          .join('');
+        html.push(`<${listType}>${items}</${listType}>`);
+        listType = null;
+        listItems = [];
+      }
+
+      lines.forEach((rawLine) => {
+        const line = rawLine.replace(/\s+$/g, '');
+        const trimmed = line.trim();
+        if (!trimmed) {
+          flushParagraph();
+          flushList();
+          return;
+        }
+
+        if (/^---+$/.test(trimmed)) {
+          flushParagraph();
+          flushList();
+          html.push('<hr />');
+          return;
+        }
+
+        const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+        if (headingMatch) {
+          flushParagraph();
+          flushList();
+          const level = Math.min(headingMatch[1].length, 6);
+          html.push(`<h${level}>${formatInlineMarkdown(headingMatch[2])}</h${level}>`);
+          return;
+        }
+
+        const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/);
+        if (bulletMatch) {
+          flushParagraph();
+          const content = bulletMatch[1];
+          if (listType && listType !== 'ul') {
+            flushList();
+          }
+          listType = 'ul';
+          listItems.push(content);
+          return;
+        }
+
+        const orderedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
+        if (orderedMatch) {
+          flushParagraph();
+          const content = orderedMatch[1];
+          if (listType && listType !== 'ol') {
+            flushList();
+          }
+          listType = 'ol';
+          listItems.push(content);
+          return;
+        }
+
+        if (listType) {
+          flushList();
+        }
+        paragraph.push(trimmed);
+      });
+
+      flushParagraph();
+      flushList();
+      return html.join('');
+    }
+
+    function renderConversationList(conversations, selectId) {
+      if (!conversationList) {
+        return;
+      }
+      conversationList.innerHTML = '';
+      conversationMeta.clear();
+      const formatter = (iso) => {
+        if (!iso) {
+          return '';
+        }
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) {
+          return '';
+        }
+        return date.toLocaleString(undefined, {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      };
+      conversations.forEach((conversation) => {
+        conversationMeta.set(conversation.id, conversation);
+        const item = document.createElement('li');
+        item.className = 'conversation-list__item';
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'conversation-list__button';
+        button.dataset.id = conversation.id;
+        button.dataset.title = conversation.title || '';
+
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'conversation-list__title';
+        titleSpan.textContent = conversation.title || 'New session';
+
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'conversation-list__meta';
+        metaSpan.textContent = formatter(conversation.created_at);
+
+        button.append(titleSpan, metaSpan);
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'conversation-list__delete';
+        deleteButton.dataset.deleteId = conversation.id;
+        deleteButton.setAttribute('aria-label', 'Delete conversation');
+        deleteButton.innerHTML = '<span class="icon icon--close" aria-hidden="true"></span>';
+
+        item.append(button, deleteButton);
+        conversationList.appendChild(item);
+      });
+      ensureConversationPlaceholder();
+      const targetId =
+        selectId && conversationMeta.has(selectId) ? selectId : activeConversationId;
+      if (targetId) {
+        setActiveConversationHighlight(targetId);
+      }
+    }
+
+    async function refreshConversations(selectId) {
+      try {
+        const response = await global.fetch('/chat/sessions', utils.withAuth());
+        if (!response.ok) {
+          throw new Error(`Failed with status ${response.status}`);
+        }
+        const conversations = await response.json();
+        renderConversationList(conversations, selectId);
+      } catch (error) {
+        console.error('Failed to refresh conversations', error);
+      }
+    }
+
+    function renderMessages(messages) {
+      chatWindow.innerHTML = '';
+      if (!Array.isArray(messages) || !messages.length) {
+        const placeholder = appendMessage('system', 'No messages yet. Ask something to begin.');
+        placeholder.dataset.placeholder = 'true';
+        return;
+      }
+      messages.forEach((message) => {
+        const role = message.role === 'assistant' ? 'assistant' : message.role === 'user' ? 'user' : 'system';
+        appendMessage(role, message.content || '');
+      });
+    }
+
+    async function loadMessages(conversationId) {
+      if (!conversationId) {
+        return;
+      }
+      try {
+        const response = await global.fetch(
+          `/chat/${conversationId}/messages`,
+          utils.withAuth(),
+        );
+        if (!response.ok) {
+          throw new Error(`Failed with status ${response.status}`);
+        }
+        const messages = await response.json();
+        renderMessages(messages);
+      } catch (error) {
+        console.error('Failed to load messages', error);
+        chatWindow.innerHTML = '';
+        appendMessage('system', 'Unable to load conversation history.');
+      }
+    }
+
+    async function activateConversation(conversationId, options = {}) {
+      if (!conversationId) {
+        return;
+      }
+      if (!conversationMeta.has(conversationId)) {
+        await refreshConversations(conversationId);
+      }
+      stopStreaming('idle');
+      activeConversationId = conversationId;
+      setActiveConversationHighlight(conversationId);
+      if (options.initialMessages) {
+        renderMessages(options.initialMessages);
+      } else if (!options.skipMessages) {
+        await loadMessages(conversationId);
+      }
+      if (!options.skipSidebarClose) {
+        closeSidebar();
+      }
+    }
+
+    function deriveTitleFromQuery(query) {
+      if (!query) {
+        return null;
+      }
+      const cleaned = query.trim().split(/\s+/).slice(0, 12).join(' ');
+      const clipped = cleaned.slice(0, 80).trim();
+      return clipped || null;
+    }
+
+    async function createConversation(title) {
+      const payload = title ? { title } : {};
+      const response = await global.fetch(
+        '/chat/sessions',
+        utils.withAuth({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+      );
+      if (!response.ok) {
+        throw new Error(`Failed with status ${response.status}`);
+      }
+      return response.json();
+    }
+
+    async function ensureConversation(query) {
+      if (activeConversationId && conversationMeta.has(activeConversationId)) {
+        return activeConversationId;
+      }
+      const session = await createConversation(deriveTitleFromQuery(query));
+      await refreshConversations(session.id);
+      await activateConversation(session.id, { initialMessages: [] });
+      return session.id;
+    }
+
+    function renderContextSources(messageElement, sources, citations) {
+      const hasSources = Array.isArray(sources) && sources.length > 0;
+      const wrapperSelector = '.message__context-wrapper';
+      let wrapper = messageElement.querySelector(wrapperSelector);
+      if (!hasSources) {
+        wrapper?.remove();
+        return;
+      }
+
+      const citationMap = new Map();
+      if (Array.isArray(citations)) {
+        citations.forEach((item) => {
+          if (item?.label) {
+            citationMap.set(String(item.label), item);
+          }
+        });
+      }
+
+      const previousDetails = wrapper?.querySelector('.message__context');
+      const wasOpen = Boolean(previousDetails?.open);
+
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'message__context-wrapper';
+        messageElement.appendChild(wrapper);
+      }
+      wrapper.innerHTML = '';
+
+      const details = document.createElement('details');
+      details.className = 'message__context';
+      details.open = wasOpen;
+
+      const summary = document.createElement('summary');
+      summary.textContent = `Context sources (${sources.length})`;
+      details.appendChild(summary);
+
+      const list = document.createElement('ul');
+      list.className = 'context-source-list';
+
+      sources.forEach((source, index) => {
+        const listItem = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'context-source';
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'context-source__label';
+        labelSpan.textContent = source.label || `Source ${index + 1}`;
+
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'context-source__title';
+        const titleText =
+          source.document_title ||
+          source.metadata?.document_title ||
+          source.metadata?.docling_chunk?.origin?.filename ||
+          `Source ${index + 1}`;
+        titleSpan.textContent = titleText;
+
+        const citationData = citationMap.get(source.label || '');
+        const page =
+          citationData?.page ??
+          source.metadata?.page_number ??
+          (Array.isArray(source.metadata?.page_numbers) ? source.metadata?.page_numbers[0] : null);
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'context-source__meta';
+        const metaParts = [];
+        if (page != null) {
+          metaParts.push(`Page ${page}`);
+        }
+        if (source.metadata?.collection) {
+          metaParts.push(String(source.metadata.collection));
+        }
+        metaSpan.textContent = metaParts.join(' • ');
+
+        const snippetSpan = document.createElement('span');
+        snippetSpan.className = 'context-source__snippet';
+        if (source.snippet) {
+          const trimmed = source.snippet.length > 200 ? `${source.snippet.slice(0, 197)}…` : source.snippet;
+          snippetSpan.textContent = trimmed;
+        } else {
+          snippetSpan.textContent = 'Snippet not available.';
+        }
+
+        const previewUrl =
+          source.metadata?.citation?.image_url ||
+          source.metadata?.page_preview ||
+          citationData?.preview ||
+          citationData?.image_url ||
+          null;
+        const fallbackUrl = citationData?.source || source.metadata?.source_path || null;
+        const resolvedPreview = previewUrl || fallbackUrl;
+        if (resolvedPreview) {
+          button.dataset.previewUrl = resolvedPreview;
+          button.addEventListener('click', () => {
+            const url = resolvedPreview.startsWith('http')
+              ? resolvedPreview
+              : resolvedPreview.startsWith('/')
+                ? resolvedPreview
+                : `${resolvedPreview}`;
+            const token = utils.getCookie('rag_token') || '';
+            const hasQuery = url.includes('?');
+            const separator = hasQuery ? '&' : '?';
+            const authedUrl = token ? `${url}${separator}token=${encodeURIComponent(token)}` : url;
+            window.open(authedUrl, '_blank', 'noopener');
+          });
+        } else {
+          button.classList.add('context-source--disabled');
+        }
+
+        button.append(labelSpan, titleSpan, metaSpan, snippetSpan);
+        listItem.appendChild(button);
+        list.appendChild(listItem);
+      });
+
+      details.appendChild(list);
+      wrapper.appendChild(details);
+    }
+
+    async function streamChatResponse(conversationId, query, assistantMessage) {
+      const contentElement = assistantMessage.querySelector('.message__content');
+      if (!contentElement) {
+        return;
+      }
+      const controller = new AbortController();
+      const mode = determineChatMode();
+      let assistantText = '';
+      let contextChunks = [];
+      let citationItems = [];
+      let streamState = 'idle';
+      activeStream = { controller, message: assistantMessage };
+      setStreamingState('streaming');
+      contentElement.innerHTML = '<p class="message__placeholder">Generating response…</p>';
+
+      const handleEvent = (event) => {
+        const type = event.type;
+        if (type === 'token') {
+          const text = typeof event.text === 'string' ? event.text : '';
+          assistantText += text;
+          const parsed = renderMarkdown(assistantText);
+          contentElement.innerHTML = parsed || escapeHtml(assistantText) || '<p></p>';
+        } else if (type === 'status' && typeof event.message === 'string') {
+          streamStatus.textContent = event.message;
+        } else if (type === 'context' && Array.isArray(event.chunks)) {
+          contextChunks = event.chunks;
+        } else if (type === 'citations' && Array.isArray(event.citations)) {
+          citationItems = event.citations;
+          renderContextSources(assistantMessage, contextChunks, citationItems);
+        } else if (type === 'error') {
+          const message =
+            typeof event.message === 'string'
+              ? event.message
+              : 'The assistant encountered an error.';
+          contentElement.textContent = message;
+          streamState = 'stopped';
+          controller.abort();
+        } else if (type === 'done') {
+          streamState = 'idle';
+          const finalText = assistantText.trim();
+          contentElement.innerHTML = finalText
+            ? renderMarkdown(finalText)
+            : '<p>No response generated.</p>';
+          renderContextSources(assistantMessage, contextChunks, citationItems);
+        }
+      };
+
+      try {
+        const response = await global.fetch(
+          `/chat/${conversationId}/messages`,
+          utils.withAuth({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, mode }),
+            signal: controller.signal,
+          }),
+        );
+        if (!response.ok || !response.body) {
+          throw new Error(`Streaming failed with status ${response.status}`);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let newlineIndex;
+          while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 1);
+            if (!line) {
+              continue;
+            }
+            try {
+              const event = JSON.parse(line);
+              handleEvent(event);
+            } catch (error) {
+              console.warn('Failed to parse chat stream event', line, error);
+            }
+          }
+        }
+        const finalChunk = buffer.trim();
+        if (finalChunk) {
+          try {
+            const event = JSON.parse(finalChunk);
+            handleEvent(event);
+          } catch (error) {
+            console.warn('Failed to parse trailing chat event', finalChunk, error);
+          }
+        }
+      } catch (error) {
+        if (controller.signal.aborted) {
+          streamState = 'stopped';
+          const current = contentElement.textContent?.trim();
+          contentElement.textContent = current
+            ? `${current} (stream stopped)`
+            : 'Streaming stopped.';
+        } else {
+          streamState = 'stopped';
+          console.error('Chat streaming failed', error);
+          const message =
+            error instanceof Error ? error.message : 'Unable to complete the request.';
+          contentElement.textContent = message;
+        }
+      } finally {
+        if (activeStream && activeStream.controller === controller) {
+          activeStream = null;
+        }
+        setStreamingState(streamState);
+        await refreshConversations(conversationId);
+      }
+    }
+
+    populateConversationMetaFromDom();
+    refreshConversations().catch((error) => {
+      console.warn('Initial conversation refresh failed', error);
+    });
+
+    chatForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const value = chatInput.value.trim();
+      if (!value || sendButton?.disabled) {
+        return;
+      }
+      try {
+        const conversationId = await ensureConversation(value);
+        chatWindow.querySelectorAll('.message[data-placeholder="true"]').forEach((node) =>
+          node.remove(),
+        );
+        appendMessage('user', value);
+        chatInput.value = '';
+        const assistant = appendMessage('assistant', '');
+        await streamChatResponse(conversationId, value, assistant);
+      } catch (error) {
+        console.error('Failed to send message', error);
+        appendMessage('system', 'Unable to send message. Please try again.');
+        setStreamingState('idle');
+      }
     });
 
     stopStreamButton?.addEventListener('click', () => {
-      stopStreaming();
-      const lastAssistant = [...chatWindow.querySelectorAll('.message--assistant')].pop();
-      const messageContent = lastAssistant?.querySelector('.message__content');
-      if (messageContent) {
-        messageContent.textContent += ' (stream stopped)';
+      if (!activeStream) {
+        return;
+      }
+      const messageElement = activeStream.message;
+      stopStreaming('stopped');
+      const content = messageElement?.querySelector('.message__content');
+      if (content) {
+        const existing = content.textContent?.trim();
+        content.textContent = existing ? `${existing} (stream stopped)` : 'Streaming stopped.';
       }
     });
 
-    conversationList?.addEventListener('click', (event) => {
+    conversationList?.addEventListener('click', async (event) => {
       const target = event.target;
       const deleteButton =
         target instanceof HTMLElement ? target.closest('.conversation-list__delete') : null;
@@ -270,28 +828,41 @@
         event.stopPropagation();
         const listItem = deleteButton.closest('.conversation-list__item');
         const conversationId = deleteButton.dataset.deleteId || null;
-        deleteConversation(conversationId, listItem);
+        await deleteConversation(conversationId, listItem);
         return;
       }
       const button = target instanceof HTMLElement ? target.closest('button[data-id]') : null;
       if (!button) {
         return;
       }
-
-      conversationList
-        .querySelectorAll('.conversation-list__button--active')
-        .forEach((active) => active.classList.remove('conversation-list__button--active'));
-
-      button.classList.add('conversation-list__button--active');
-      activeConversationId = button.dataset.id || null;
-      const title = button.querySelector('.conversation-list__title');
-      const label = title ? title.textContent : 'conversation';
-      appendMessage('system', `Loaded conversation "${label}".`);
-      closeSidebar();
+      const conversationId = button.dataset.id || '';
+      if (!conversationId) {
+        return;
+      }
+      await activateConversation(conversationId);
     });
 
-    newConversationButton?.addEventListener('click', () => {
-      appendMessage('system', 'New conversation started. Streaming responses will appear here.');
+    newConversationButton?.addEventListener('click', async () => {
+      stopStreaming('idle');
+      try {
+        const session = await createConversation(null);
+        await refreshConversations(session.id);
+        await activateConversation(session.id, {
+          initialMessages: [],
+          skipSidebarClose: true,
+        });
+        chatWindow.querySelectorAll('.message[data-placeholder="true"]').forEach((node) =>
+          node.remove(),
+        );
+        const placeholder = appendMessage(
+          'system',
+          'New conversation started. Ask a question to begin.',
+        );
+        placeholder.dataset.placeholder = 'true';
+      } catch (error) {
+        console.error('Failed to create conversation', error);
+        appendMessage('system', 'Unable to create a new conversation. Please try again.');
+      }
     });
 
     setSidebarToggleState(!layout.classList.contains('chat-layout--sidebar-hidden'));

@@ -29,6 +29,7 @@
                     type="button"
                     data-id="{{ convo.id }}"
                     data-title="{{ convo.title or '' }}"
+                    data-created-at="{{ convo.created_at.isoformat() if convo.created_at else '' }}"
                   >
                     <span class="conversation-list__title">{{ convo.title or 'New session' }}</span>
                     <span class="conversation-list__meta">
