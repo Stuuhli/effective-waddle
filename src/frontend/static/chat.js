@@ -215,10 +215,7 @@
 
       message.append(author, body);
       
-      if (
-        type === 'assistant' &&
-        (Array.isArray(options.contextSources) || Array.isArray(options.citations))
-      ) {
+      if (type === 'assistant') {
         const contextSources = Array.isArray(options.contextSources) ? options.contextSources : [];
         const citationItems = Array.isArray(options.citations) ? options.citations : [];
         renderContextSources(message, contextSources, citationItems);
@@ -565,14 +562,10 @@
     }
 
     function renderContextSources(messageElement, sources, citations) {
-      const hasSources = Array.isArray(sources) && sources.length > 0;
       const wrapperSelector = '.message__context-wrapper';
       let wrapper = messageElement.querySelector(wrapperSelector);
-      if (!hasSources) {
-        wrapper?.remove();
-        return;
-      }
 
+      const sourceList = Array.isArray(sources) ? [...sources] : [];
       const citationMap = new Map();
       if (Array.isArray(citations)) {
         citations.forEach((item) => {
@@ -582,8 +575,22 @@
         });
       }
 
-      const previousDetails = wrapper?.querySelector('.message__context');
-      const wasOpen = Boolean(previousDetails?.open);
+      if (!sourceList.length && citationMap.size) {
+        citationMap.forEach((citation) => {
+          sourceList.push({
+            label: citation.label,
+            snippet: '',
+            metadata: {},
+            document_metadata: {},
+            document_title: citation.document_title,
+          });
+        });
+      }
+
+      if (!sourceList.length) {
+        wrapper?.remove();
+        return;
+      }
 
       if (!wrapper) {
         wrapper = document.createElement('div');
@@ -592,18 +599,43 @@
       }
       wrapper.innerHTML = '';
 
-      const details = document.createElement('details');
-      details.className = 'message__context';
-      details.open = wasOpen;
-
-      const summary = document.createElement('summary');
-      summary.textContent = `Context sources (${sources.length})`;
-      details.appendChild(summary);
-
       const list = document.createElement('ul');
       list.className = 'context-source-list';
 
-      sources.forEach((source, index) => {
+      sourceList.forEach((source, index) => {
+        const citationData = citationMap.get(source.label || '');
+        const label = source.label || citationData?.label || `Source ${index + 1}`;
+        const headings = Array.isArray(source.metadata?.docling_chunk?.headings)
+          ? source.metadata.docling_chunk.headings.filter(
+              (heading) => typeof heading === 'string' && heading.trim(),
+            )
+          : [];
+        const originalFilename =
+          source.document_metadata?.ingestion_parameters?.original_filename ??
+          source.metadata?.docling_chunk?.origin?.filename ??
+          citationData?.document_title ??
+          source.document_title ??
+          source.metadata?.document_title ??
+          `Source ${index + 1}`;
+        const page =
+          citationData?.page ??
+          source.metadata?.page_number ??
+          (Array.isArray(source.metadata?.page_numbers) ? source.metadata.page_numbers[0] : null);
+        const collection = source.metadata?.collection || source.document_metadata?.collection_name || null;
+        const metaParts = [];
+        if (page != null) {
+          metaParts.push(`Page ${page}`);
+        }
+        if (headings.length) {
+          metaParts.push(headings.join(' • '));
+        }
+        if (collection) {
+          metaParts.push(String(collection));
+        }
+        if (citationData?.source && citationData.source !== originalFilename) {
+          metaParts.push(citationData.source);
+        }
+
         const listItem = document.createElement('li');
         const button = document.createElement('button');
         button.type = 'button';
@@ -611,55 +643,45 @@
 
         const labelSpan = document.createElement('span');
         labelSpan.className = 'context-source__label';
-        labelSpan.textContent = source.label || `Source ${index + 1}`;
+        labelSpan.textContent = label;
 
         const titleSpan = document.createElement('span');
         titleSpan.className = 'context-source__title';
-        const titleText =
-          source.document_title ||
-          source.metadata?.document_title ||
-          source.metadata?.docling_chunk?.origin?.filename ||
-          `Source ${index + 1}`;
-        titleSpan.textContent = titleText;
+        titleSpan.textContent = originalFilename;
 
-        const citationData = citationMap.get(source.label || '');
-        const page =
-          citationData?.page ??
-          source.metadata?.page_number ??
-          (Array.isArray(source.metadata?.page_numbers) ? source.metadata?.page_numbers[0] : null);
         const metaSpan = document.createElement('span');
         metaSpan.className = 'context-source__meta';
-        const metaParts = [];
-        if (page != null) {
-          metaParts.push(`Page ${page}`);
-        }
-        if (source.metadata?.collection) {
-          metaParts.push(String(source.metadata.collection));
-        }
         metaSpan.textContent = metaParts.join(' • ');
 
         const snippetSpan = document.createElement('span');
         snippetSpan.className = 'context-source__snippet';
-        if (source.snippet) {
-          const trimmed = source.snippet.length > 200 ? `${source.snippet.slice(0, 197)}…` : source.snippet;
+        const snippetText =
+          source.snippet ||
+          source.metadata?.snippet ||
+          source.metadata?.docling_chunk?.snippet ||
+          '';
+        if (snippetText) {
+          const trimmed = snippetText.length > 200 ? `${snippetText.slice(0, 197)}…` : snippetText;
           snippetSpan.textContent = trimmed;
         } else {
           snippetSpan.textContent = 'Snippet not available.';
         }
 
-        const previewUrl =
+        const destination =
           source.metadata?.citation?.image_url ||
           source.metadata?.page_preview ||
           citationData?.preview ||
           citationData?.image_url ||
+          citationData?.source ||
+          source.metadata?.source_path ||
+          source.document_metadata?.source_path ||
           null;
-        const fallbackUrl = citationData?.source || source.metadata?.source_path || null;
-        const resolvedPreview = previewUrl || fallbackUrl;
-        if (resolvedPreview) {
-          button.dataset.previewUrl = resolvedPreview;
+
+        if (destination) {
+          button.dataset.previewUrl = destination;
           button.addEventListener('click', (event) => {
             event.preventDefault();
-            openPreviewResource(resolvedPreview);
+            openPreviewResource(destination);
           });
         } else {
           button.classList.add('context-source--disabled');
@@ -670,8 +692,7 @@
         list.appendChild(listItem);
       });
 
-      details.appendChild(list);
-      wrapper.appendChild(details);
+      wrapper.appendChild(list);
     }
 
     async function openPreviewResource(previewTarget) {

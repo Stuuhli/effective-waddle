@@ -151,7 +151,6 @@ class RetrievalService:
                         "assistant",
                         response_body,
                         context=context_chunks or None,
-                        citations=citation_items or None,
                     )
                     await self.conversation_repo.commit()
 

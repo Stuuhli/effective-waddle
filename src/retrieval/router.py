@@ -1,6 +1,8 @@
 """Retrieval endpoints."""
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 
@@ -11,6 +13,63 @@ from .schemas import ChatMessageRequest, ChatMessageResponse, ChatSessionCreate,
 from .service import RetrievalService
 
 router = APIRouter()
+
+
+def _derive_citations(context: list[dict[str, Any]] | None) -> list[dict[str, object]] | None:
+    """Extract a concise citation payload from persisted context."""
+
+    if not isinstance(context, list):
+        return None
+    citations: list[dict[str, object]] = []
+    for entry in context:
+        if not isinstance(entry, dict):
+            continue
+        metadata = entry.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        document_metadata = entry.get("document_metadata")
+        if not isinstance(document_metadata, dict):
+            document_metadata = {}
+        ingestion_params = document_metadata.get("ingestion_parameters")
+        if not isinstance(ingestion_params, dict):
+            ingestion_params = {}
+        citation_meta = metadata.get("citation")
+        if not isinstance(citation_meta, dict):
+            citation_meta = {}
+        label = entry.get("label") or metadata.get("label")
+        if label is None:
+            continue
+        label_text = str(label)
+        page_numbers = metadata.get("page_numbers")
+        if isinstance(page_numbers, list) and page_numbers:
+            first_page = page_numbers[0]
+        else:
+            first_page = None
+        page = citation_meta.get("page_number") or metadata.get("page_number") or first_page
+        document_title = (
+            ingestion_params.get("original_filename")
+            or entry.get("document_title")
+            or document_metadata.get("document_title")
+            or metadata.get("document_title")
+        )
+        source_path = (
+            citation_meta.get("source")
+            or metadata.get("source_path")
+            or document_metadata.get("source_path")
+            or metadata.get("source")
+        )
+        citations.append(
+            {
+                "label": label_text,
+                "chunk_id": entry.get("chunk_id"),
+                "document_id": entry.get("document_id"),
+                "document_title": document_title,
+                "score": entry.get("score"),
+                "source": source_path,
+                "page": page,
+            }
+        )
+    return citations or None
 
 
 @router.post("/sessions", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -52,7 +111,7 @@ async def list_messages(
             content=msg.content,
             created_at=msg.created_at,
             context=getattr(msg, "context_json", None),
-            citations=getattr(msg, "citations_json", None),
+            citations=_derive_citations(getattr(msg, "context_json", None)),
         )
         for msg in messages
     ]
