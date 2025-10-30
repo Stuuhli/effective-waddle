@@ -89,6 +89,8 @@ class RetrievalService:
             )
             stream_start = perf_counter()
             tokens: list[str] = []
+            context_chunks: list[dict[str, object]] = []
+            citation_items: list[dict[str, object]] = []
             try:
                 async for event in strategy.run(context):
                     if event.type == "status":
@@ -100,6 +102,8 @@ class RetrievalService:
                         )
                     elif event.type == "context":
                         chunks = event.data.get("chunks") or []
+                        if isinstance(chunks, list):
+                            context_chunks = [chunk for chunk in chunks if isinstance(chunk, dict)]
                         LOGGER.info(
                             "Chat event context | conversation=%s chunks=%d",
                             conversation_id,
@@ -107,6 +111,12 @@ class RetrievalService:
                         )
                     elif event.type == "citations":
                         citations = event.data.get("citations") or []
+                        if isinstance(citations, list):
+                            citation_items = [
+                                citation
+                                for citation in citations
+                                if isinstance(citation, dict)
+                            ]
                         LOGGER.info(
                             "Chat event citations | conversation=%s citations=%d",
                             conversation_id,
@@ -140,7 +150,13 @@ class RetrievalService:
                     len(response_body),
                 )
                 if response_body:
-                    await self.conversation_repo.add_message(conversation_id, "assistant", response_body)
+                    await self.conversation_repo.add_message(
+                        conversation_id,
+                        "assistant",
+                        response_body,
+                        context=context_chunks or None,
+                        citations=citation_items or None,
+                    )
                     await self.conversation_repo.commit()
 
         return _stream()

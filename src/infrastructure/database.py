@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum as PyEnum
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -169,6 +169,8 @@ class Message(TimestampMixin, Base):
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    context_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    citations_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 

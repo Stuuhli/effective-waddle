@@ -26,6 +26,8 @@ class ChatMessageResponse(BaseModel):
     role: str
     content: str
     created_at: datetime
+    context: list[dict[str, object]] | None = Field(default=None, description="Retrieved context")
+    citations: list[dict[str, object]] | None = Field(default=None, description="Associated citations")
 
 
 __all__ = [
