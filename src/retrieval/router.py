@@ -47,7 +47,13 @@ async def list_messages(
 ) -> list[ChatMessageResponse]:
     messages = await service.get_messages(session_id, user.id)
     return [
-        ChatMessageResponse(role=msg.role, content=msg.content, created_at=msg.created_at)
+        ChatMessageResponse(
+            role=msg.role,
+            content=msg.content,
+            created_at=msg.created_at,
+            context=getattr(msg, "context_json", None),
+            citations=getattr(msg, "citations_json", None),
+        )
         for msg in messages
     ]
 

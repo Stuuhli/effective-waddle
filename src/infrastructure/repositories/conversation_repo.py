@@ -25,8 +25,22 @@ class ConversationRepository(AsyncRepository[Conversation]):
         await self.session.refresh(conversation)
         return conversation
 
-    async def add_message(self, conversation_id: str, role: str, content: str) -> Message:
-        message = Message(conversation_id=conversation_id, role=role, content=content)
+    async def add_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content: str,
+        *,
+        context: list[dict[str, object]] | None = None,
+        citations: list[dict[str, object]] | None = None,
+    ) -> Message:
+        message = Message(
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            context_json=context,
+            citations_json=citations,
+        )
         self.session.add(message)
         await self.session.flush()
         await self.session.refresh(message)

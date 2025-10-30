@@ -196,7 +196,7 @@
       }
     }
 
-    function appendMessage(type, text) {
+    function appendMessage(type, text, options = {}) {
       const message = document.createElement('div');
       message.className = `message message--${type}`;
 
@@ -214,6 +214,15 @@
       }
 
       message.append(author, body);
+      
+      if (
+        type === 'assistant' &&
+        (Array.isArray(options.contextSources) || Array.isArray(options.citations))
+      ) {
+        const contextSources = Array.isArray(options.contextSources) ? options.contextSources : [];
+        const citationItems = Array.isArray(options.citations) ? options.citations : [];
+        renderContextSources(message, contextSources, citationItems);
+      }
       chatWindow.appendChild(message);
       chatWindow.scrollTop = chatWindow.scrollHeight;
       return message;
@@ -472,7 +481,10 @@
       }
       messages.forEach((message) => {
         const role = message.role === 'assistant' ? 'assistant' : message.role === 'user' ? 'user' : 'system';
-        appendMessage(role, message.content || '');
+        appendMessage(role, message.content || '', {
+          contextSources: message.context,
+          citations: message.citations,
+        });
       });
     }
 
@@ -666,18 +678,27 @@
       if (!previewTarget) {
         return;
       }
-      const previewWindow = global.open('', '_blank', 'noopener');
+
+      let previewWindow = null;
       try {
         const previewUrl = new URL(previewTarget, global.location.origin);
         const sameOrigin = previewUrl.origin === global.location.origin;
+
         if (!sameOrigin) {
-          if (previewWindow) {
-            previewWindow.location.replace(previewUrl.toString());
-          } else {
-            global.open(previewUrl.toString(), '_blank', 'noopener');
-          }
+          global.open(previewUrl.toString(), '_blank', 'noopener');
           return;
         }
+
+        previewWindow = global.open('about:blank', '_blank');
+        if (!previewWindow) {
+          throw new Error('Browser blocked the preview window.');
+        }
+        try {
+          previewWindow.opener = null;
+        } catch (openerError) {
+          console.debug('Unable to clear preview window opener', openerError);
+        }
+        previewWindow.document.title = 'Loading preview…';
 
         const response = await global.fetch(
           previewUrl.toString(),
@@ -686,22 +707,18 @@
         if (!response.ok) {
           throw new Error(`Preview request failed with status ${response.status}`);
         }
+
         const blob = await response.blob();
         const objectUrl = global.URL.createObjectURL(blob);
-        const targetWindow = previewWindow ?? global.open('', '_blank', 'noopener');
-        if (targetWindow) {
-          targetWindow.location.replace(objectUrl);
-          const cleanup = () => {
-            global.URL.revokeObjectURL(objectUrl);
-          };
-          targetWindow.addEventListener('beforeunload', cleanup, { once: true });
-          global.setTimeout(cleanup, 60_000);
-        } else {
+        previewWindow.location.replace(objectUrl);
+
+        const cleanup = () => {
           global.URL.revokeObjectURL(objectUrl);
-          throw new Error('Browser blocked the preview window.');
-        }
+        };
+        previewWindow.addEventListener('beforeunload', cleanup, { once: true });
+        global.setTimeout(cleanup, 60_000);
       } catch (error) {
-        if (previewWindow) {
+        if (previewWindow && !previewWindow.closed) {
           previewWindow.close();
         }
         console.error('Failed to open preview', error);
