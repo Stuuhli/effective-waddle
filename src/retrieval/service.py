@@ -112,11 +112,7 @@ class RetrievalService:
                     elif event.type == "citations":
                         citations = event.data.get("citations") or []
                         if isinstance(citations, list):
-                            citation_items = [
-                                citation
-                                for citation in citations
-                                if isinstance(citation, dict)
-                            ]
+                            citation_items = [ citation for citation in citations if isinstance(citation, dict)]
                         LOGGER.info(
                             "Chat event citations | conversation=%s citations=%d",
                             conversation_id,

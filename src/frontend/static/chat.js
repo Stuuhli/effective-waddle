@@ -214,7 +214,7 @@
       }
 
       message.append(author, body);
-
+      
       if (
         type === 'assistant' &&
         (Array.isArray(options.contextSources) || Array.isArray(options.citations))
@@ -223,7 +223,6 @@
         const citationItems = Array.isArray(options.citations) ? options.citations : [];
         renderContextSources(message, contextSources, citationItems);
       }
-
       chatWindow.appendChild(message);
       chatWindow.scrollTop = chatWindow.scrollHeight;
       return message;
