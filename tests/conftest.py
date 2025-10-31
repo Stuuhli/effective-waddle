@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 
@@ -102,6 +103,18 @@ def app(monkeypatch: pytest.MonkeyPatch) -> Iterator[FastAPI]:
 
     settings = Settings()
     settings.fastapi.secret_key = "test-secret"
+    storage_root = Path(tempfile.mkdtemp(prefix="rag_platform_storage_"))
+    upload_dir = storage_root / "uploads"
+    docling_dir = storage_root / "docling"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    docling_dir.mkdir(parents=True, exist_ok=True)
+    settings.storage = settings.storage.model_copy(
+        update={
+            "upload_dir": upload_dir,
+            "docling_output_dir": docling_dir,
+            "docling_hash_index": docling_dir / "index.json",
+        },
+    )
 
     async def _get_db_session():
         async with session_factory() as session:
@@ -132,6 +145,7 @@ def app(monkeypatch: pytest.MonkeyPatch) -> Iterator[FastAPI]:
     finally:
         app.dependency_overrides.clear()
         engine.dispose()
+        shutil.rmtree(storage_root, ignore_errors=True)
         try:
             os.remove(db_path)
         except OSError:

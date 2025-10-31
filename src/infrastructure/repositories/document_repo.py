@@ -322,5 +322,14 @@ class DocumentRepository(AsyncRepository[Document]):
         result = await self.session.execute(stmt)
         return {row[0]: row[1] for row in result}
 
+    async def delete_job(self, job: IngestionJob) -> None:
+        """Remove an ingestion job and any associated documents."""
+
+        for event in list(job.events or []):
+            await self.session.delete(event)
+        for document in list(job.documents or []):
+            await self.session.delete(document)
+        await self.session.delete(job)
+
 
 __all__ = ["DocumentRepository"]

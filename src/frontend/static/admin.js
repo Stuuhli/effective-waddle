@@ -487,14 +487,11 @@
       }
 
       try {
-        const response = await fetch(
-          endpoint,
-          utils.withAuth({
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          }),
-        );
+        const response = await utils.fetchWithAuth(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
         const contentType = response.headers.get('Content-Type') || '';
         const isJson = contentType.includes('application/json');
         const data = isJson ? await response.json() : null;
@@ -918,11 +915,11 @@
         return;
       }
       try {
-        const response = await fetch(`/admin/users/${user.id}/status`, utils.withAuth({
+        const response = await utils.fetchWithAuth(`/admin/users/${user.id}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ is_active: nextStatus }),
-        }));
+        });
         if (!response.ok) {
           throw new Error('Request failed');
         }
@@ -956,7 +953,7 @@
         return;
       }
       try {
-        const response = await fetch(`/admin/users/${user.id}`, utils.withAuth({ method: 'DELETE' }));
+        const response = await utils.fetchWithAuth(`/admin/users/${user.id}`, { method: 'DELETE' });
         if (!response.ok) {
           throw new Error('Request failed');
         }
@@ -983,10 +980,9 @@
         return;
       }
       try {
-        const response = await fetch(
-          `/admin/collections/${collection.id}`,
-          utils.withAuth({ method: 'DELETE' }),
-        );
+        const response = await utils.fetchWithAuth(`/admin/collections/${collection.id}`, {
+          method: 'DELETE',
+        });
         if (!response.ok) {
           throw new Error('Request failed');
         }
@@ -1060,7 +1056,7 @@
 
     async function loadRoles() {
       try {
-        const response = await fetch('/admin/roles', utils.withAuth());
+        const response = await utils.fetchWithAuth('/admin/roles');
         if (!response.ok) {
           throw new Error('Failed to load roles');
         }
@@ -1075,7 +1071,7 @@
 
     async function loadUsers(showStatus) {
       try {
-        const response = await fetch('/admin/users', utils.withAuth());
+        const response = await utils.fetchWithAuth('/admin/users');
         if (!response.ok) {
           throw new Error('Failed to load users');
         }
@@ -1095,7 +1091,7 @@
 
     async function loadCollections(showStatus) {
       try {
-        const response = await fetch('/admin/collections', utils.withAuth());
+        const response = await utils.fetchWithAuth('/admin/collections');
         if (!response.ok) {
           throw new Error('Failed to load collections');
         }
@@ -1193,14 +1189,11 @@
           dialogState.mode === 'edit'
             ? `/admin/users/${dialogState.userId}`
             : '/admin/users';
-        const response = await fetch(
-          endpoint,
-          utils.withAuth({
-            method: dialogState.mode === 'edit' ? 'PATCH' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          }),
-        );
+        const response = await utils.fetchWithAuth(endpoint, {
+          method: dialogState.mode === 'edit' ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
         const isJson = response.headers.get('Content-Type')?.includes('application/json');
         const data = isJson ? await response.json() : null;
         if (!response.ok || !data) {
@@ -1310,11 +1303,11 @@
       }
       const roles = collectCheckedRoles(elements.userRoleOptions);
       try {
-        const response = await fetch(`/admin/users/${userId}/roles`, utils.withAuth({
+        const response = await utils.fetchWithAuth(`/admin/users/${userId}/roles`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ role_names: roles }),
-        }));
+        });
         if (!response.ok) {
           throw new Error('Failed to update roles');
         }
@@ -1347,11 +1340,11 @@
         return;
       }
       try {
-        const response = await fetch('/admin/roles', utils.withAuth({
+        const response = await utils.fetchWithAuth('/admin/roles', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, description: description || null }),
-        }));
+        });
         if (!response.ok) {
           throw new Error('Failed to create role');
         }
@@ -1380,11 +1373,11 @@
       }
       const roles = collectCheckedRoles(elements.collectionCreateRoleOptions);
       try {
-        const response = await fetch('/admin/collections', utils.withAuth({
+        const response = await utils.fetchWithAuth('/admin/collections', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, description: description || null, role_names: roles }),
-        }));
+        });
         if (response.status === 409) {
           setStatus(elements.createCollectionStatus, 'A collection with that name already exists.', 'error');
           return;
@@ -1414,11 +1407,11 @@
       }
       const roles = collectCheckedRoles(elements.collectionRoleOptions);
       try {
-        const response = await fetch(`/admin/collections/${collectionId}/roles`, utils.withAuth({
+        const response = await utils.fetchWithAuth(`/admin/collections/${collectionId}/roles`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ role_names: roles }),
-        }));
+        });
         if (response.status === 404) {
           setStatus(elements.collectionRoleStatus, 'Collection not found.', 'error');
           return;

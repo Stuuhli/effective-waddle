@@ -75,6 +75,7 @@
             <label class="config__field">
               <span>Collection</span>
               <select name="collection" id="collection-select" required>
+                <option value="">Select a collection…</option>
                 {% for collection in collections %}
                   <option
                     value="{{ collection.name }}"
@@ -171,7 +172,7 @@
 
         <section class="job-history">
           <header>
-            <h3>Recent jobs</h3>
+            <h3>Ingested documents</h3>
             <button class="link-button" id="refresh-jobs" type="button">Refresh</button>
           </header>
           <table>
@@ -182,18 +183,36 @@
                 <th scope="col">Collection</th>
                 <th scope="col">Status</th>
                 <th scope="col">Updated</th>
+                <th scope="col" class="job-actions-header">Actions</th>
               </tr>
             </thead>
             <tbody id="job-table-body">
-              {% for job in recent_jobs %}
-                <tr>
-                  <td>{{ job.id }}</td>
-                  <td>{{ job.source }}</td>
-                  <td>{{ job.collection }}</td>
-                  <td class="job-status"><span class="status-pill status-pill--{{ job.status }}">{{ job.status }}</span></td>
-                  <td>{{ job.updated_at }}</td>
+              {% if recent_jobs %}
+                {% for job in recent_jobs %}
+                  <tr data-job-id="{{ job.id }}">
+                    <td>{{ job.id }}</td>
+                    <td class="job-source">{{ job.source }}</td>
+                    <td>{{ job.collection }}</td>
+                    <td class="job-status"><span class="status-pill status-pill--{{ job.status }}">{{ job.status }}</span></td>
+                    <td class="job-updated">{{ job.updated_at }}</td>
+                    <td class="job-actions">
+                      <button
+                        class="icon-button icon-button--danger"
+                        type="button"
+                        data-job-id="{{ job.id }}"
+                        data-action="delete-job"
+                        aria-label="Delete document {{ job.source }}"
+                        title="Delete document">
+                        <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>
+                      </button>
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr class="job-table__empty-row">
+                  <td colspan="6" class="job-table__empty">No ingested documents yet.</td>
                 </tr>
-              {% endfor %}
+              {% endif %}
             </tbody>
           </table>
         </section>

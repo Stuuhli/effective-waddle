@@ -73,3 +73,46 @@ def test_prepare_chunks_includes_citation_image_url(tmp_path: Path) -> None:
     assert citation["image_path"] == tmp_path.as_posix()
     assert citation["docling_hash"] == "hash"
     assert citation["image_url"] == "/ingestion/documents/doc-1/pages/1/preview"
+    assert citation["pages"] == [
+        {
+            "page_number": 1,
+            "image_url": "/ingestion/documents/doc-1/pages/1/preview",
+            "image_path": tmp_path.as_posix(),
+        }
+    ]
+
+
+def test_build_citation_includes_all_pages(tmp_path: Path) -> None:
+    page1 = ParsedPage(
+        number=1,
+        content="Page 1",
+        metadata={"image_path": (tmp_path / "page1.png").as_posix()},
+    )
+    page2 = ParsedPage(
+        number=2,
+        content="Page 2",
+        metadata={},  # simulate page without stored image path
+    )
+
+    citation = DocumentIngestionPipeline._build_citation(
+        document_id="doc-1",
+        pages=[page1, page2],
+        page_numbers=[1, 2],
+        fallback_page=1,
+        docling_hash="hash",
+    )
+
+    assert citation["page_number"] == 1
+    assert citation["image_url"] == "/ingestion/documents/doc-1/pages/1/preview"
+    assert citation["docling_hash"] == "hash"
+    assert citation["pages"] == [
+        {
+            "page_number": 1,
+            "image_url": "/ingestion/documents/doc-1/pages/1/preview",
+            "image_path": (tmp_path / "page1.png").as_posix(),
+        },
+        {
+            "page_number": 2,
+            "image_url": "/ingestion/documents/doc-1/pages/2/preview",
+        },
+    ]

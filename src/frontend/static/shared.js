@@ -8,6 +8,12 @@
       .find(([key]) => key === name)?.[1];
   }
 
+  function setCookie(name, value, attributes = '') {
+    const cleaned = attributes ? attributes.replace(/;+$/g, '') : '';
+    const attr = cleaned ? `; ${cleaned}` : '';
+    document.cookie = `${name}=${value}${attr}`;
+  }
+
   function isAdmin() {
     const body = document.body;
     if (!body) {
@@ -33,10 +39,81 @@
     };
   }
 
+  let refreshInFlight = null;
+
+  async function refreshAccessToken() {
+    if (refreshInFlight) {
+      return refreshInFlight;
+    }
+    const refreshToken = getCookie('rag_refresh');
+    if (!refreshToken) {
+      return null;
+    }
+    refreshInFlight = (async () => {
+      try {
+        const response = await fetch('/auth/jwt/refresh', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!response.ok) {
+          return null;
+        }
+        const data = await response.json().catch(() => ({}));
+        const accessToken = data?.access_token;
+        const refreshValue = data?.refresh_token;
+        const expiresIn = Number(data?.expires_in);
+        if (accessToken) {
+          setCookie('rag_token', '', 'Max-Age=0; Path=/; SameSite=Lax;');
+          const maxAge = Number.isFinite(expiresIn) && expiresIn > 0 ? Math.floor(expiresIn) : 1800;
+          setCookie('rag_token', accessToken, `Path=/; SameSite=Lax; Max-Age=${maxAge}`);
+        }
+        if (refreshValue) {
+          setCookie('rag_refresh', '', 'Max-Age=0; Path=/; SameSite=Lax;');
+          setCookie('rag_refresh', refreshValue, 'Path=/; SameSite=Lax;');
+        }
+        return accessToken || null;
+      } catch (error) {
+        console.warn('Failed to refresh access token', error);
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+    return refreshInFlight;
+  }
+
+  async function fetchWithAuth(resource, options = {}, retryOnAuth = true) {
+    const execute = () => fetch(resource, withAuth(options));
+    let response = await execute();
+    if (response.status !== 401 || !retryOnAuth) {
+      if (response.status === 401) {
+        redirectToLogin();
+      }
+      return response;
+    }
+
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) {
+      redirectToLogin();
+      return response;
+    }
+
+    response = await execute();
+    if (response.status === 401) {
+      redirectToLogin();
+    }
+    return response;
+  }
+
   function clearAuthCookies() {
     const cookies = ['rag_token', 'rag_refresh', 'rag_admin'];
     cookies.forEach((name) => {
-      document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax;`;
+      setCookie(name, '', 'Max-Age=0; Path=/; SameSite=Lax;');
     });
   }
 
@@ -101,8 +178,11 @@
 
   global.FrontendUtils = Object.freeze({
     getCookie,
+    setCookie,
     isAdmin,
     withAuth,
+    refreshAccessToken,
+    fetchWithAuth,
     clearAuthCookies,
     redirectToLogin,
     currentUser,

@@ -61,6 +61,7 @@ body.chat-fullscreen {
   box-shadow: var(--shadow);
   overflow: hidden;
   position: relative;
+  width: 85%;
 }
 
 .chat-layout--sidebar-hidden {

@@ -319,6 +319,18 @@ body {
   transition: border-color var(--transition), box-shadow var(--transition);
 }
 
+.config__field select option {
+  color: #080710;
+  background-color: #ffffff;
+}
+
+
+.config__field select option:checked,
+.config__field select option:hover {
+  color: #000000;
+  background-color: rgba(180, 205, 255, 0.65);
+}
+
 .config__field input:focus,
 .config__field select:focus {
   border-color: rgba(255, 255, 255, 0.4);
@@ -519,6 +531,64 @@ body {
   width: 0.5rem;
   height: 0.5rem;
   opacity: 1;
+}
+
+.job-actions-header {
+  text-align: right;
+}
+
+.job-actions {
+  text-align: right;
+}
+
+.job-table__empty {
+  text-align: center;
+  padding: 1rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition),
+    transform var(--transition);
+}
+
+.icon-button svg {
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+
+.icon-button:hover,
+.icon-button:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.icon-button--danger {
+  border-color: rgba(255, 107, 129, 0.45);
+  color: rgba(255, 107, 129, 0.95);
+}
+
+.icon-button--danger:hover,
+.icon-button--danger:focus-visible {
+  background: rgba(255, 107, 129, 0.2);
+  border-color: rgba(255, 107, 129, 0.55);
+  color: #ffffff;
 }
 
 @media (max-width: 1080px) {

@@ -79,10 +79,9 @@
         return;
       }
       try {
-        const response = await global.fetch(
-          `/chat/sessions/${conversationId}`,
-          utils.withAuth({ method: 'DELETE' }),
-        );
+        const response = await utils.fetchWithAuth(`/chat/sessions/${conversationId}`, {
+          method: 'DELETE',
+        });
         if (!response.ok) {
           throw new Error(`Failed with status ${response.status}`);
         }
@@ -302,13 +301,10 @@
     }
 
     function renderMarkdown(text) {
-      const lines = String(text ?? '')
-        .replace(/\r\n/g, '\n')
-        .split('\n');
+      const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n');
       const html = [];
+      const listStack = [];
       let paragraph = [];
-      let listType = null;
-      let listItems = [];
 
       function flushParagraph() {
         if (!paragraph.length) {
@@ -321,32 +317,105 @@
         paragraph = [];
       }
 
-      function flushList() {
-        if (!listType || !listItems.length) {
-          listType = null;
-          listItems = [];
+      function closeCurrentListItem() {
+        if (!listStack.length) {
           return;
         }
-        const items = listItems
-          .map((content) => `<li>${formatInlineMarkdown(content)}</li>`)
-          .join('');
-        html.push(`<${listType}>${items}</${listType}>`);
-        listType = null;
-        listItems = [];
+        const top = listStack[listStack.length - 1];
+        if (top.openItem) {
+          html.push('</li>');
+          top.openItem = false;
+        }
+      }
+
+      function closeListsUntil(indent) {
+        while (listStack.length) {
+          const top = listStack[listStack.length - 1];
+          if (top.indent <= indent) {
+            break;
+          }
+          listStack.pop();
+          if (top.openItem) {
+            html.push('</li>');
+          }
+          html.push(`</${top.type}>`);
+        }
+      }
+
+      function closeAllLists() {
+        closeCurrentListItem();
+        while (listStack.length) {
+          const top = listStack.pop();
+          if (top.openItem) {
+            html.push('</li>');
+          }
+          html.push(`</${top.type}>`);
+        }
+      }
+
+      function ensureList(type, indent) {
+        if (!listStack.length) {
+          html.push(`<${type}>`);
+          const entry = { type, indent, openItem: false };
+          listStack.push(entry);
+          return entry;
+        }
+
+        let top = listStack[listStack.length - 1];
+        if (indent > top.indent) {
+          if (!top.openItem) {
+            html.push('<li>');
+            top.openItem = true;
+          }
+          html.push(`<${type}>`);
+          const entry = { type, indent, openItem: false };
+          listStack.push(entry);
+          return entry;
+        }
+
+        closeListsUntil(indent);
+
+        if (!listStack.length) {
+          html.push(`<${type}>`);
+          const entry = { type, indent, openItem: false };
+          listStack.push(entry);
+          return entry;
+        }
+
+        top = listStack[listStack.length - 1];
+        if (top.indent === indent && top.type === type) {
+          closeCurrentListItem();
+          return top;
+        }
+
+        if (top.indent === indent && top.type !== type) {
+          listStack.pop();
+          if (top.openItem) {
+            html.push('</li>');
+          }
+          html.push(`</${top.type}>`);
+        }
+
+        html.push(`<${type}>`);
+        const entry = { type, indent, openItem: false };
+        listStack.push(entry);
+        return entry;
       }
 
       lines.forEach((rawLine) => {
         const line = rawLine.replace(/\s+$/g, '');
+        const leadingSpaces = rawLine.match(/^\s*/)[0].length;
         const trimmed = line.trim();
+
         if (!trimmed) {
           flushParagraph();
-          flushList();
+          closeCurrentListItem();
           return;
         }
 
         if (/^---+$/.test(trimmed)) {
           flushParagraph();
-          flushList();
+          closeAllLists();
           html.push('<hr />');
           return;
         }
@@ -354,44 +423,41 @@
         const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
         if (headingMatch) {
           flushParagraph();
-          flushList();
+          closeAllLists();
           const level = Math.min(headingMatch[1].length, 6);
           html.push(`<h${level}>${formatInlineMarkdown(headingMatch[2])}</h${level}>`);
           return;
         }
 
-        const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/);
+        const bulletMatch = trimmed.match(/^[-*+]\s+(.*)$/);
         if (bulletMatch) {
           flushParagraph();
-          const content = bulletMatch[1];
-          if (listType && listType !== 'ul') {
-            flushList();
-          }
-          listType = 'ul';
-          listItems.push(content);
+          const target = ensureList('ul', leadingSpaces);
+          html.push('<li>');
+          target.openItem = true;
+          html.push(formatInlineMarkdown(bulletMatch[1]));
           return;
         }
 
         const orderedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
         if (orderedMatch) {
           flushParagraph();
-          const content = orderedMatch[1];
-          if (listType && listType !== 'ol') {
-            flushList();
-          }
-          listType = 'ol';
-          listItems.push(content);
+          const target = ensureList('ol', leadingSpaces);
+          html.push('<li>');
+          target.openItem = true;
+          html.push(formatInlineMarkdown(orderedMatch[1]));
           return;
         }
 
-        if (listType) {
-          flushList();
+        if (listStack.length && leadingSpaces === 0) {
+          closeAllLists();
         }
+
         paragraph.push(trimmed);
       });
 
       flushParagraph();
-      flushList();
+      closeAllLists();
       return html.join('');
     }
 
@@ -458,7 +524,7 @@
 
     async function refreshConversations(selectId) {
       try {
-        const response = await global.fetch('/chat/sessions', utils.withAuth());
+        const response = await utils.fetchWithAuth('/chat/sessions');
         if (!response.ok) {
           throw new Error(`Failed with status ${response.status}`);
         }
@@ -490,10 +556,7 @@
         return;
       }
       try {
-        const response = await global.fetch(
-          `/chat/${conversationId}/messages`,
-          utils.withAuth(),
-        );
+        const response = await utils.fetchWithAuth(`/chat/${conversationId}/messages`);
         if (!response.ok) {
           throw new Error(`Failed with status ${response.status}`);
         }
@@ -537,14 +600,11 @@
 
     async function createConversation(title) {
       const payload = title ? { title } : {};
-      const response = await global.fetch(
-        '/chat/sessions',
-        utils.withAuth({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }),
-      );
+      const response = await utils.fetchWithAuth('/chat/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
       if (!response.ok) {
         throw new Error(`Failed with status ${response.status}`);
       }
@@ -617,14 +677,83 @@
           source.document_title ??
           source.metadata?.document_title ??
           `Source ${index + 1}`;
-        const page =
+        const fallbackPage =
           citationData?.page ??
           source.metadata?.page_number ??
           (Array.isArray(source.metadata?.page_numbers) ? source.metadata.page_numbers[0] : null);
         const collection = source.metadata?.collection || source.document_metadata?.collection_name || null;
+
+        const previewPagesRaw = [];
+        if (Array.isArray(source.metadata?.citation?.pages)) {
+          previewPagesRaw.push(...source.metadata.citation.pages);
+        }
+        if (Array.isArray(citationData?.pages)) {
+          previewPagesRaw.push(...citationData.pages);
+        }
+        const previewPages = [];
+        const seenPreviewUrls = new Set();
+        previewPagesRaw.forEach((pageData) => {
+          if (!pageData || typeof pageData !== 'object') {
+            return;
+          }
+          const rawUrl = pageData.image_url ?? pageData.url;
+          if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+            return;
+          }
+          let absoluteUrl;
+          try {
+            absoluteUrl = new URL(rawUrl, global.location.origin).toString();
+          } catch (error) {
+            absoluteUrl = rawUrl;
+          }
+          if (seenPreviewUrls.has(absoluteUrl)) {
+            return;
+          }
+          seenPreviewUrls.add(absoluteUrl);
+          const pageNumberRaw = pageData.page_number ?? pageData.page;
+          const pageNumberParsed =
+            typeof pageNumberRaw === 'number'
+              ? Number.isFinite(pageNumberRaw)
+                ? pageNumberRaw
+                : null
+              : Number.isFinite(Number.parseInt(pageNumberRaw, 10))
+              ? Number.parseInt(pageNumberRaw, 10)
+              : null;
+          previewPages.push({
+            url: absoluteUrl,
+            pageNumber: pageNumberParsed,
+          });
+        });
+
+        const pageNumbers = Array.from(
+          new Set(
+            previewPages
+              .map((item) => (typeof item.pageNumber === 'number' && Number.isFinite(item.pageNumber) ? item.pageNumber : null))
+              .filter((value) => value !== null),
+          ),
+        ).sort((a, b) => a - b);
+
         const metaParts = [];
-        if (page != null) {
-          metaParts.push(`Page ${page}`);
+        if (pageNumbers.length === 0 && fallbackPage != null) {
+          metaParts.push(`Page ${fallbackPage}`);
+        } else if (pageNumbers.length === 1) {
+          metaParts.push(`Page ${pageNumbers[0]}`);
+        } else if (pageNumbers.length > 1) {
+          const ranges = [];
+          let rangeStart = pageNumbers[0];
+          let previous = pageNumbers[0];
+          for (let i = 1; i < pageNumbers.length; i += 1) {
+            const current = pageNumbers[i];
+            if (current === previous + 1) {
+              previous = current;
+              continue;
+            }
+            ranges.push(rangeStart === previous ? `${rangeStart}` : `${rangeStart}–${previous}`);
+            rangeStart = current;
+            previous = current;
+          }
+          ranges.push(rangeStart === previous ? `${rangeStart}` : `${rangeStart}–${previous}`);
+          metaParts.push(`Pages ${ranges.join(', ')}`);
         }
         if (headings.length) {
           metaParts.push(headings.join(' • '));
@@ -667,7 +796,7 @@
           snippetSpan.textContent = 'Snippet not available.';
         }
 
-        const destination =
+        const fallbackDestination =
           source.metadata?.citation?.image_url ||
           source.metadata?.page_preview ||
           citationData?.preview ||
@@ -676,12 +805,33 @@
           source.metadata?.source_path ||
           source.document_metadata?.source_path ||
           null;
+        const primaryPreview = previewPages.length ? previewPages[0].url : fallbackDestination;
 
-        if (destination) {
-          button.dataset.previewUrl = destination;
+        if (previewPages.length > 1) {
+          button.dataset.previewPages = JSON.stringify(previewPages);
+        }
+        if (primaryPreview) {
+          button.dataset.previewUrl = primaryPreview;
           button.addEventListener('click', (event) => {
             event.preventDefault();
-            openPreviewResource(destination);
+            let pagesToPreview = null;
+            if (button.dataset.previewPages) {
+              try {
+                const parsed = JSON.parse(button.dataset.previewPages);
+                if (Array.isArray(parsed)) {
+                  pagesToPreview = parsed;
+                }
+              } catch (error) {
+                console.warn('Failed to parse preview pages payload', error);
+              }
+            }
+            if (pagesToPreview && pagesToPreview.length > 1) {
+              openPreviewGallery(pagesToPreview, originalFilename).catch((error) => {
+                console.error('Failed to open preview gallery', error);
+              });
+              return;
+            }
+            openPreviewResource(button.dataset.previewUrl, originalFilename);
           });
         } else {
           button.classList.add('context-source--disabled');
@@ -695,7 +845,7 @@
       wrapper.appendChild(list);
     }
 
-    async function openPreviewResource(previewTarget) {
+    async function openPreviewResource(previewTarget, title) {
       if (!previewTarget) {
         return;
       }
@@ -719,12 +869,9 @@
         } catch (openerError) {
           console.debug('Unable to clear preview window opener', openerError);
         }
-        previewWindow.document.title = 'Loading preview…';
+        previewWindow.document.title = title ? `${title} preview` : 'Loading preview…';
 
-        const response = await global.fetch(
-          previewUrl.toString(),
-          utils.withAuth({ method: 'GET' }),
-        );
+        const response = await utils.fetchWithAuth(previewUrl.toString(), { method: 'GET' });
         if (!response.ok) {
           throw new Error(`Preview request failed with status ${response.status}`);
         }
@@ -745,6 +892,113 @@
         console.error('Failed to open preview', error);
         global.alert('Unable to open the cited document preview. Please check your permissions.');
       }
+    }
+
+    async function openPreviewGallery(pages, title) {
+      if (!Array.isArray(pages) || !pages.length) {
+        return;
+      }
+
+      const previewWindow = global.open('about:blank', '_blank');
+      if (!previewWindow) {
+        global.alert('Unable to open preview window. Check your popup blocker.');
+        return;
+      }
+      try {
+        previewWindow.opener = null;
+      } catch (openerError) {
+        console.debug('Unable to clear preview window opener', openerError);
+      }
+      const safeTitle = title ? escapeHtml(title) : 'Document preview';
+      previewWindow.document.open();
+      previewWindow.document.write(`<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${safeTitle}</title>
+    <style>
+      body { margin: 0; padding: 1.5rem; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f17; color: #f7f7f8; }
+      h1 { margin: 0 0 1rem; font-size: 1.3rem; font-weight: 600; }
+      .loading { opacity: 0.75; }
+    </style>
+  </head>
+  <body>
+    <h1>${safeTitle}</h1>
+    <p class="loading">Loading previews…</p>
+  </body>
+</html>`);
+      previewWindow.document.close();
+
+      const objectUrls = [];
+      try {
+        const figures = [];
+        for (let index = 0; index < pages.length; index += 1) {
+          const page = pages[index];
+          if (!page || typeof page !== 'object' || typeof page.url !== 'string' || !page.url) {
+            continue;
+          }
+          let absoluteUrl;
+          try {
+            absoluteUrl = new URL(page.url, global.location.origin).toString();
+          } catch (error) {
+            absoluteUrl = page.url;
+          }
+          const response = await utils.fetchWithAuth(absoluteUrl, { method: 'GET' });
+          if (!response.ok) {
+            throw new Error(`Preview request failed with status ${response.status}`);
+          }
+          const blob = await response.blob();
+          const objectUrl = global.URL.createObjectURL(blob);
+          objectUrls.push(objectUrl);
+          const caption =
+            typeof page.pageNumber === 'number' && Number.isFinite(page.pageNumber)
+              ? `Page ${page.pageNumber}`
+              : `Preview ${index + 1}`;
+          figures.push(`<figure><img src="${objectUrl}" alt="${escapeHtml(caption)}" loading="lazy" /><figcaption>${escapeHtml(caption)}</figcaption></figure>`);
+        }
+
+        const stylesheet = `
+        body { margin: 0; padding: 1.5rem; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f17; color: #f7f7f8; }
+        h1 { margin: 0 0 1rem; font-size: 1.3rem; font-weight: 600; }
+        main { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+        figure { margin: 0; background: rgba(255, 255, 255, 0.06); border-radius: 16px; padding: 1rem; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25); }
+        img { display: block; width: 100%; height: auto; border-radius: 12px; }
+        figcaption { margin-top: 0.75rem; font-size: 0.9rem; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.8; }
+      `;
+        const markup = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${safeTitle}</title>
+    <style>${stylesheet}</style>
+  </head>
+  <body>
+    <h1>${safeTitle}</h1>
+    <main>
+      ${figures.join('') || '<p>No previews available.</p>'}
+    </main>
+  </body>
+</html>`;
+        previewWindow.document.open();
+        previewWindow.document.write(markup);
+        previewWindow.document.close();
+      } catch (error) {
+        console.error('Failed to render preview gallery', error);
+        previewWindow.document.open();
+        previewWindow.document.write(`<!DOCTYPE html><html><body><h1>${safeTitle}</h1><p>Unable to load previews.</p></body></html>`);
+        previewWindow.document.close();
+      }
+
+      const cleanup = () => {
+        objectUrls.forEach((url) => {
+          try {
+            global.URL.revokeObjectURL(url);
+          } catch (revokeError) {
+            console.debug('Failed to revoke object URL', revokeError);
+          }
+        });
+      };
+      previewWindow.addEventListener('beforeunload', cleanup, { once: true });
     }
 
     async function streamChatResponse(conversationId, query, assistantMessage) {
@@ -851,15 +1105,12 @@
       };
 
       try {
-        const response = await global.fetch(
-          `/chat/${conversationId}/messages`,
-          utils.withAuth({
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, mode }),
-            signal: controller.signal,
-          }),
-        );
+        const response = await utils.fetchWithAuth(`/chat/${conversationId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, mode }),
+          signal: controller.signal,
+        });
         if (!response.ok || !response.body) {
           throw new Error(`Streaming failed with status ${response.status}`);
         }

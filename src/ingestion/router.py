@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
 
 from ..auth.dependencies import get_current_user
@@ -165,6 +165,16 @@ async def list_jobs(
         )
         for job in jobs
     ]
+
+
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(
+    job_id: str,
+    user: User = Depends(get_current_user),
+    service: IngestionService = Depends(get_ingestion_service),
+) -> Response:
+    await service.delete_job(job_id, roles=list(user.roles), is_superuser=bool(user.is_superuser))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/collections", response_model=list[CollectionResponse])

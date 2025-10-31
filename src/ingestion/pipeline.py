@@ -363,6 +363,7 @@ class DocumentIngestionPipeline:
         if not source_paths:
             raise IngestionError(f"No documents discovered at {job.source}")
 
+        produced_any_chunks = False
         for path in source_paths:
             LOGGER.info("Ingesting document %s for job %s", path, job.id)
             parse_event = await self._ensure_event(job, IngestionStep.docling_parse, document_path=str(path))
@@ -397,15 +398,22 @@ class DocumentIngestionPipeline:
                 chunk_overlap=chunk_overlap,
             )
 
+            if not chunks:
+                detail = {
+                    "chunks": 0,
+                    "chunk_size": chunk_size,
+                    "chunk_overlap": chunk_overlap,
+                    "reason": "Document did not contain chunkable content.",
+                }
+                await self._mark_event_failure(chunk_event, document=document, detail=detail)
+                raise IngestionError("No chunks produced for document")
+
             await self._mark_event_success(
                 chunk_event,
                 document=document,
                 detail={"chunks": len(chunks), "chunk_size": chunk_size, "chunk_overlap": chunk_overlap},
             )
-
-            if not chunks:
-                LOGGER.warning("No chunks produced for document %s", document.id)
-                continue
+            produced_any_chunks = True
 
             embed_event = await self._ensure_event(job, IngestionStep.embedding_indexing, document=document, document_path=str(path))
             await self._mark_event_running(embed_event, document=document)
@@ -425,6 +433,9 @@ class DocumentIngestionPipeline:
                 document=document,
                 detail={"citations": self._build_citation_payload(chunks, document.id)},
             )
+
+        if not produced_any_chunks:
+            raise IngestionError("Ingestion completed without producing any chunks.")
 
     def _discover_sources(self, source: str) -> list[Path]:
         path = Path(source)
@@ -473,6 +484,22 @@ class DocumentIngestionPipeline:
         await self.repository.update_event_status(
             event,
             status=IngestionEventStatus.success,
+            detail=detail,
+            document_id=getattr(document, "id", None),
+            document_title=getattr(document, "title", None),
+        )
+        await self.repository.commit()
+
+    async def _mark_event_failure(
+        self,
+        event: IngestionEvent,
+        *,
+        document: Any | None = None,
+        detail: dict[str, object] | None = None,
+    ) -> None:
+        await self.repository.update_event_status(
+            event,
+            status=IngestionEventStatus.failed,
             detail=detail,
             document_id=getattr(document, "id", None),
             document_title=getattr(document, "title", None),
@@ -580,7 +607,8 @@ class DocumentIngestionPipeline:
                 }
                 metadata["citation"] = self._build_citation(
                     document_id=document_id,
-                    page=parsed_page,
+                    pages=[page for page in (page_lookup.get(number) for number in page_numbers) if page is not None],
+                    page_numbers=page_numbers,
                     fallback_page=primary_page,
                     docling_hash=base_metadata.get("docling_hash"),
                 )
@@ -615,7 +643,8 @@ class DocumentIngestionPipeline:
                 }
                 metadata["citation"] = self._build_citation(
                     document_id=document_id,
-                    page=page,
+                    pages=[page],
+                    page_numbers=[page.number],
                     fallback_page=page.number,
                     docling_hash=base_metadata.get("docling_hash"),
                 )
@@ -674,21 +703,69 @@ class DocumentIngestionPipeline:
     def _build_citation(
         *,
         document_id: str,
-        page: ParsedPage | None,
+        pages: Sequence[ParsedPage],
+        page_numbers: Sequence[int] | None,
         fallback_page: int | None,
         docling_hash: object,
     ) -> dict[str, object]:
-        page_number = page.number if page is not None else fallback_page
         citation: dict[str, object] = {}
-        if page_number is not None:
-            citation["page_number"] = page_number
-            citation["image_url"] = f"/ingestion/documents/{document_id}/pages/{page_number}/preview"
+
+        ordered_numbers: list[int] = []
+        if page_numbers:
+            for candidate in page_numbers:
+                try:
+                    number = int(candidate)
+                except (TypeError, ValueError):
+                    continue
+                if number not in ordered_numbers:
+                    ordered_numbers.append(number)
+        if fallback_page is not None and fallback_page not in ordered_numbers:
+            ordered_numbers.append(fallback_page)
+
+        page_map: dict[int, ParsedPage] = {}
+        for page in pages:
+            try:
+                page_number = int(page.number)
+            except (TypeError, ValueError):
+                continue
+            page_map[page_number] = page
+            if page_number not in ordered_numbers:
+                ordered_numbers.append(page_number)
+
+        page_entries: list[dict[str, object]] = []
+        for number in ordered_numbers:
+            entry: dict[str, object] = {
+                "page_number": number,
+                "image_url": f"/ingestion/documents/{document_id}/pages/{number}/preview",
+            }
+            page = page_map.get(number)
+            if page is not None:
+                image_path = page.metadata.get("image_path")
+                if image_path:
+                    entry["image_path"] = image_path
+            page_entries.append(entry)
+
+        primary_page_number: int | None = ordered_numbers[0] if ordered_numbers else None
+        if primary_page_number is not None:
+            citation["page_number"] = primary_page_number
+            citation["image_url"] = f"/ingestion/documents/{document_id}/pages/{primary_page_number}/preview"
+
         if docling_hash is not None:
             citation["docling_hash"] = docling_hash
-        if page is not None:
-            image_path = page.metadata.get("image_path")
+
+        if page_entries:
+            citation["pages"] = page_entries
+            if primary_page_number is not None:
+                primary_entry = next(
+                    (entry for entry in page_entries if entry["page_number"] == primary_page_number),
+                    page_entries[0],
+                )
+            else:
+                primary_entry = page_entries[0]
+            image_path = primary_entry.get("image_path")
             if image_path:
                 citation["image_path"] = image_path
+
         return citation
 
     @staticmethod
@@ -704,6 +781,7 @@ class DocumentIngestionPipeline:
                         "image_url": citation.get("image_url"),
                         "image_path": citation.get("image_path"),
                         "docling_hash": citation.get("docling_hash"),
+                        "pages": citation.get("pages"),
                     }
                 )
         return payload

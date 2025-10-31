@@ -3,6 +3,8 @@
 
   const PLACEHOLDER_TEXT = JSON.stringify({ status: 'waiting for run' });
   const PIPELINE_STEPS = ['docling', 'chunking', 'embeddings', 'citations'];
+  const DELETE_ICON =
+    '<svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>';
 
   function init() {
     const utils = global.FrontendUtils;
@@ -38,8 +40,17 @@
       return;
     }
 
-    const { isAdmin, withAuth } = utils;
+    const { isAdmin, fetchWithAuth } = utils;
     let queue = [];
+
+    function updateRunButtonState() {
+      if (!elements.runWorkflow) {
+        return;
+      }
+      const hasFiles = queue.length > 0;
+      const hasCollection = elements.collectionSelect ? Boolean(elements.collectionSelect.value) : true;
+      elements.runWorkflow.disabled = !(hasFiles && hasCollection);
+    }
 
     if (!isAdmin()) {
       if (elements.workflowPanel) {
@@ -71,6 +82,7 @@
       if (chunkOverlap && !Number.isNaN(overlap) && overlap >= 0) {
         chunkOverlap.value = String(overlap);
       }
+      updateRunButtonState();
     });
 
     function updateQueueView() {
@@ -80,8 +92,8 @@
       elements.fileList.innerHTML = '';
       if (!queue.length) {
         elements.fileList.innerHTML = '<li class="file-list__empty">No documents queued yet.</li>';
-        elements.runWorkflow.disabled = true;
         elements.fileClear.disabled = true;
+        updateRunButtonState();
         return;
       }
 
@@ -99,8 +111,8 @@
         elements.fileList.appendChild(item);
       });
 
-      elements.runWorkflow.disabled = false;
       elements.fileClear.disabled = false;
+      updateRunButtonState();
     }
 
     function addFiles(list) {
@@ -284,6 +296,10 @@
       if (!body) {
         return;
       }
+      const emptyRow = body.querySelector('.job-table__empty-row');
+      if (emptyRow) {
+        emptyRow.remove();
+      }
       let row = body.querySelector(`tr[data-job-id="${job.id}"]`);
       if (!row) {
         row = document.createElement('tr');
@@ -294,6 +310,17 @@
           <td class="job-collection"></td>
           <td class="job-status"></td>
           <td class="job-updated"></td>
+          <td class="job-actions">
+            <button
+              class="icon-button icon-button--danger"
+              type="button"
+              data-action="delete-job"
+              data-job-id="${job.id}"
+              aria-label="Delete document ${job.source}"
+              title="Delete document">
+              ${DELETE_ICON}
+            </button>
+          </td>
         `;
         body.prepend(row);
       }
@@ -303,6 +330,26 @@
       row.querySelector('.job-collection').textContent = job.collection;
       row.querySelector('.job-status').innerHTML = statusMarkup;
       row.querySelector('.job-updated').textContent = job.updated_at;
+      const deleteButton = row.querySelector('button[data-action="delete-job"]');
+      if (deleteButton) {
+        deleteButton.dataset.jobId = job.id;
+        deleteButton.setAttribute('aria-label', `Delete document ${job.source}`);
+        deleteButton.title = 'Delete document';
+      }
+    }
+
+    function renderJobEmptyState() {
+      const body = elements.jobTableBody;
+      if (!body) {
+        return;
+      }
+      if (body.querySelector('tr')) {
+        return;
+      }
+      const row = document.createElement('tr');
+      row.className = 'job-table__empty-row';
+      row.innerHTML = '<td colspan="6" class="job-table__empty">No ingested documents yet.</td>';
+      body.appendChild(row);
     }
 
     async function submitJobs(config) {
@@ -316,7 +363,7 @@
         JSON.stringify({ include_tables: config.include_tables, generate_citations: config.generate_citations })
       );
 
-      const response = await fetch('/ingestion/jobs/upload', withAuth({ method: 'POST', body }));
+      const response = await fetchWithAuth('/ingestion/jobs/upload', { method: 'POST', body });
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || 'Ingestion request failed');
@@ -327,10 +374,9 @@
     async function pollJob(jobId, config) {
       let complete = false;
       while (!complete) {
-        const response = await fetch(
-          `/ingestion/jobs/${jobId}`,
-          withAuth({ headers: { Accept: 'application/json' } })
-        );
+        const response = await fetchWithAuth(`/ingestion/jobs/${jobId}`, {
+          headers: { Accept: 'application/json' },
+        });
         if (!response.ok) {
           throw new Error('Failed to fetch job status');
         }
@@ -356,10 +402,16 @@
         return;
       }
       const formData = new FormData(elements.configForm);
+      const collectionValue = String(formData.get('collection') ?? '').trim();
+      if (!collectionValue) {
+        elements.collectionSelect?.focus();
+        updateRunButtonState();
+        return;
+      }
       const config = {
         chunk_size: Number(formData.get('chunk_size')),
         chunk_overlap: Number(formData.get('chunk_overlap')),
-        collection: String(formData.get('collection')),
+        collection: collectionValue,
         include_tables: formData.get('include_tables') === 'on',
         generate_citations: formData.get('generate_citations') === 'on',
       };
@@ -383,15 +435,15 @@
         console.error(error);
         setStepStatus('docling', 'error', 'Upload failed');
       } finally {
-        elements.runWorkflow.disabled = false;
+        updateRunButtonState();
       }
     });
 
     elements.refreshJobs?.addEventListener('click', async () => {
       try {
         const [collectionsResponse, jobsResponse] = await Promise.all([
-          fetch('/ingestion/collections', withAuth({ headers: { Accept: 'application/json' } })),
-          fetch('/ingestion/jobs', withAuth({ headers: { Accept: 'application/json' } })),
+          fetchWithAuth('/ingestion/collections', { headers: { Accept: 'application/json' } }),
+          fetchWithAuth('/ingestion/jobs', { headers: { Accept: 'application/json' } }),
         ]);
 
         if (!collectionsResponse.ok) {
@@ -403,15 +455,22 @@
 
         if (elements.collectionSelect) {
           const collectionsData = await collectionsResponse.json();
-          elements.collectionSelect.innerHTML = '';
+          const previousValue = elements.collectionSelect.value;
+          elements.collectionSelect.innerHTML = '<option value="">Select a collection…</option>';
+          let hasPreviousValue = false;
           collectionsData.forEach((item) => {
             const option = document.createElement('option');
             option.value = item.name;
             option.dataset.defaultSize = item.default_chunk_size;
             option.dataset.defaultOverlap = item.default_chunk_overlap;
             option.textContent = `${item.name} • ${item.document_count} docs`;
+            if (item.name === previousValue) {
+              hasPreviousValue = true;
+            }
             elements.collectionSelect.appendChild(option);
           });
+          elements.collectionSelect.value = hasPreviousValue ? previousValue : '';
+          updateRunButtonState();
         } else {
           await collectionsResponse.json();
         }
@@ -428,13 +487,57 @@
               updated_at: new Date(job.updated_at).toLocaleString(),
             });
           });
+          renderJobEmptyState();
         }
       } catch (error) {
         console.error(error);
+        setStepStatus('docling', 'error', error.message || 'Unable to refresh job list');
+      }
+    });
+
+    elements.jobTableBody?.addEventListener('click', async (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      const button = target.closest('button[data-action="delete-job"]');
+      if (!button) {
+        return;
+      }
+      const jobId = button.dataset.jobId || '';
+      if (!jobId) {
+        return;
+      }
+      const row = button.closest('tr');
+      const label = row?.querySelector('.job-source')?.textContent?.trim() || jobId;
+      if (!global.confirm(`Delete "${label}" and remove all related artefacts?`)) {
+        return;
+      }
+
+      button.disabled = true;
+      try {
+        const response = await fetchWithAuth(`/ingestion/jobs/${jobId}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || `Failed with status ${response.status}`);
+        }
+        row?.remove();
+        renderJobEmptyState();
+      } catch (error) {
+        console.error('Failed to delete ingestion job', error);
+        global.alert(
+          error instanceof Error
+            ? `Unable to delete document: ${error.message}`
+            : 'Unable to delete document.',
+        );
+      } finally {
+        button.disabled = false;
       }
     });
 
     updateQueueView();
+    updateRunButtonState();
+    renderJobEmptyState();
   }
 
   if (document.readyState === 'loading') {

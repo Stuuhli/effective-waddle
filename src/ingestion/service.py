@@ -1,6 +1,11 @@
 """Ingestion orchestration service."""
 from __future__ import annotations
 
+import json
+import logging
+import shutil
+from pathlib import Path
+
 from fastapi import HTTPException, status
 
 from ..config import Settings, load_settings
@@ -16,6 +21,8 @@ from ..infrastructure.database import (
 )
 from ..infrastructure.repositories.document_repo import DocumentRepository
 from .schemas import IngestionJobCreate
+
+LOGGER = logging.getLogger(__name__)
 
 
 class IngestionService:
@@ -156,6 +163,155 @@ class IngestionService:
         )
         await self.document_repo.commit()
         return updated
+
+    async def delete_job(self, job_id: str, *, roles: list[Role], is_superuser: bool = False) -> None:
+        job = await self.document_repo.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+        if not is_superuser:
+            allowed_collections = await self.document_repo.list_collections_for_roles(roles)
+            allowed_ids = {collection.id for collection in allowed_collections}
+            if job.collection_id not in allowed_ids:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Collection not accessible")
+
+        cleanup_paths, index_keys = self._collect_artifacts(job)
+
+        await self.document_repo.delete_job(job)
+        await self.document_repo.commit()
+
+        self._prune_docling_index(index_keys)
+        self._cleanup_files(cleanup_paths)
+
+    def _collect_artifacts(self, job: IngestionJob) -> tuple[set[Path], set[str]]:
+        storage_settings = self.settings.storage
+        docling_root = Path(storage_settings.docling_output_dir)
+        cleanup_paths: set[Path] = set()
+        index_keys: set[str] = set()
+
+        def add_cleanup_path(value: object) -> None:
+            if not isinstance(value, str) or not value.strip():
+                return
+            try:
+                candidate = Path(value).expanduser()
+            except (TypeError, ValueError):
+                return
+            cleanup_paths.add(candidate)
+
+        def add_index_source(value: object) -> None:
+            if not isinstance(value, str) or not value.strip():
+                return
+            index_keys.add(value)
+            add_cleanup_path(value)
+
+        add_index_source(job.source)
+
+        for event in job.events or []:
+            add_cleanup_path(event.document_path)
+
+        for document in job.documents or []:
+            add_index_source(document.source_path)
+            metadata = document.metadata_json or {}
+            source_meta = metadata.get("source_path")
+            add_index_source(source_meta)
+
+            docling_output = metadata.get("docling_output")
+            if isinstance(docling_output, str):
+                add_cleanup_path(docling_output)
+                try:
+                    cleanup_paths.add(Path(docling_output).expanduser().parent)
+                except (TypeError, ValueError):
+                    pass
+
+            image_dir = metadata.get("image_dir")
+            add_cleanup_path(image_dir)
+
+            docling_hash = metadata.get("docling_hash")
+            if isinstance(docling_hash, str) and docling_hash:
+                cleanup_paths.add(docling_root / docling_hash)
+
+        return cleanup_paths, index_keys
+
+    def _cleanup_files(self, paths: set[Path]) -> None:
+        if not paths:
+            return
+
+        storage_settings = self.settings.storage
+        allowed_roots = [
+            Path(storage_settings.upload_dir).resolve(),
+            Path(storage_settings.docling_output_dir).resolve(),
+        ]
+
+        for path in paths:
+            try:
+                resolved = path.expanduser().resolve(strict=False)
+            except (OSError, RuntimeError):
+                continue
+
+            if not any(root in resolved.parents or resolved == root for root in allowed_roots):
+                continue
+
+            if resolved in allowed_roots:
+                # Never remove the root storage directories themselves.
+                continue
+
+            if resolved.is_dir():
+                try:
+                    shutil.rmtree(resolved, ignore_errors=False)
+                except FileNotFoundError:
+                    continue
+                except OSError as error:
+                    LOGGER.warning("Failed to remove directory %s: %s", resolved, error)
+            else:
+                try:
+                    resolved.unlink(missing_ok=True)
+                except OSError as error:
+                    LOGGER.warning("Failed to remove file %s: %s", resolved, error)
+
+    def _prune_docling_index(self, sources: set[str]) -> None:
+        if not sources:
+            return
+
+        index_path = Path(self.settings.storage.docling_hash_index)
+        if not index_path.exists():
+            return
+
+        try:
+            mapping = json.loads(index_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            LOGGER.warning("Docling hash index %s is corrupted; skipping cleanup.", index_path)
+            return
+
+        normalized: set[str] = set()
+        for entry in sources:
+            if not entry:
+                continue
+            normalized.add(str(entry))
+            try:
+                normalized.add(str(Path(entry).expanduser().resolve()))
+            except (OSError, ValueError):
+                continue
+
+        changed = False
+        for key in list(mapping.keys()):
+            try:
+                reference = {key, str(Path(key).expanduser().resolve())}
+            except (OSError, ValueError):
+                reference = {key}
+            if reference & normalized:
+                mapping.pop(key, None)
+                changed = True
+
+        if not changed:
+            return
+
+        if mapping:
+            index_path.write_text(json.dumps(mapping, indent=2, ensure_ascii=False), encoding="utf-8")
+        else:
+            try:
+                index_path.unlink()
+            except OSError as error:
+                LOGGER.warning("Failed to remove empty Docling hash index %s: %s", index_path, error)
 
 
 __all__ = ["IngestionService"]
